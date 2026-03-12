@@ -1,0 +1,2501 @@
+///$tab Log
+//Log:
+//ny
+
+
+///$tab Start
+//********************************SHEET: Start, START*******************************
+$(Include=..\..\11_utility\111_setup\1113_frameworkroutines\logging.qvs);
+$(Include=..\..\11_utility\111_setup\1113_frameworkroutines\Environment.qvs);
+CALL STARTLOG;
+
+let QVD_FILE = 'None';
+
+ $(Include=..\..\11_utility\111_setup\1113_frameworkroutines\standardroutines.qvs);
+
+//Load StandardRoutines
+$(Include=..\..\11_utility\111_setup\1113_frameworkroutines\standardroutines.qvs);
+$(Include=..\..\11_utility\111_setup\1113_frameworkroutines\logging.qvs);
+
+CALL UtilityStartRoutines;
+
+//Rutine for the start log
+CALL UtilityAuditLogDetailStart;
+
+//Connect to datasource
+$(Include=..\..\11_utility\111_setup\1111_connections\EDW_Connection_KOS.qvs);
+
+//Set path for source qvd files:
+SET vf_PathFileName	='[..\..\..\1_KOS\14_EDW\1403_Datakilder\';
+
+//Detect Document name, Tilføjet 04/10/2018 og bruges af Subrutinerne: CALL FactsUsedInQlikMart & CALL DimensionsUsedInQlikMart 
+Let vDocumentName = subfield(DocumentName(), '.',1); 
+///$tab Load Fact
+//********************************SHEET: Load Fact, START*******************************
+//Enter fact qvd files to include in datamart (don't change tablename fact):
+
+FactFromQvd:
+LOAD * INLINE [
+	FileNameOfFact, SubFolder, GlobalRessource
+    Fact_LISSAGER_VerserendeSager_FLA2024			,140303_LISSAGER
+];
+
+//Set schema name for views
+Set vf_SchemaName='dbo';
+
+//Enter fact views to include in datamart (don't change tablename):
+FactFromDatawarehouse:
+LOAD * INLINE [
+	ViewNameOfFact
+];
+
+CALL FactsUsedInQlikMart; 
+
+CALL UtilityLoadFactsFromQvdAndDatawarehouse;
+///$tab Load Dimensions
+//********************************SHEET: Load Dimensions, START*******************************
+//Enter dimension qvd files to include in datamart (don't change tablename Dimension):
+//In the field WhereExistField you can enter the dimension key, meaning that only dimensions with relations to facts are loaded
+
+DimensionFromQvd:
+LOAD * INLINE [
+	FileNameOfDimension, WhereExistField, SubFolder, GlobalRessource, WhereStatement
+	Dim_LISSAGER_Kalender						,					,140303_LISSAGER,,
+	Dim_LISSAGER_Gerning_VerserendeSager		,Gerning_Key 		,140303_LISSAGER,,
+	Dim_LISSAGER_Organisation_VerserendeSager	,Organisation_Key	,140303_LISSAGER,,
+	Dim_LISSAGER_SagStatus_VerserendeSager 		,					,140303_LISSAGER,,
+	Dim_LISSAGER_Organisation                   ,                   ,140303_LISSAGER,,
+	Dim_LISSAGER_JournalNr_GDPR                 ,JournalNr_Key      ,140303_LISSAGER,,
+	Dim_OMD_POLSAS_Opdateret					,					,140305_System,,
+];
+
+//where not Match(Organisation_Politikreds,'13','14')
+
+//Set schema name for views
+Set vf_SchemaName='dbo';
+
+//Enter dimension views to include in datamart (don't change tablename):
+DimensionFromDatawarehouse:
+LOAD * INLINE [
+	ViewNameOfDimension, WhereExistField];
+	
+CALL DimensionsUsedInQlikMart;  
+
+CALL UtilityLoadDimensionsFromQvdAndDatawarehouse;
+
+//Fjernelse af overflødige felter
+
+Drop Field ITOekonomiskKriminalitet;
+
+
+///$tab Mappings
+//Mapping af felter
+
+MAP_SAGSOMRÅDENR:
+Mapping Load
+Gerning_Key,
+Gerning_Sagsomraadenr
+Resident Dim_LISSAGER_Gerning_VerserendeSager
+where Gerning_Sagsomraadenr > 0;
+
+MAP_SAGSOMRÅDENAVN:
+Mapping Load
+Gerning_Key,
+Gerning_SagsOmraade
+Resident Dim_LISSAGER_Gerning_VerserendeSager
+where Gerning_Sagsomraadenr > 0;
+
+MAP_SAGSSTATUS:
+Mapping load 
+     SagStatus_Key,
+     SagStatusKode
+Resident Dim_LISSAGER_SagStatus_VerserendeSager;
+
+MAP_SAGSSTATUSTEKST:
+Mapping load 
+     SagStatus_Key,
+     SagStatusKodeTekst
+Resident Dim_LISSAGER_SagStatus_VerserendeSager;
+
+MAP_KRIMINALITETSART:
+Mapping Load
+Gerning_Key,
+Gerning_KriminalitetsArt
+Resident Dim_LISSAGER_Gerning_VerserendeSager;
+
+MAP_KALENDER:
+Mapping Load 
+    Kalender_Key,
+    (left(Kalender_Key,6)) as ÅÅÅÅMM 
+Resident Dim_LISSAGER_Kalender;
+
+MAP_KREDS:
+Mapping Load 
+    Organisation_Key,
+   (Organisation_Orgkreds & '|' & Organisation_AfdelingsKode) as Afdeling_KEY
+Resident Dim_LISSAGER_Organisation_VerserendeSager;
+
+MAP_RAKREDS:
+Mapping Load 
+     (Organisation_Orgkreds & '|' & Organisation_AfdelingsKode) as Afdeling_KEY,
+      if(Organisation_Flag_NSK =1, 15, Organisation_Politikreds) as KredsNr
+Resident Dim_LISSAGER_Organisation_VerserendeSager;
+
+MAP_KREDSNR:
+Mapping Load 
+    Organisation_Key,
+    if(Organisation_Flag_NSK =1, 15, Organisation_Politikreds) as KredsNr
+Resident Dim_LISSAGER_Organisation_VerserendeSager;
+
+MAP_KREDSNAVN:
+Mapping Load 
+    Organisation_Politikreds,
+    Organisation_PolitikredsNavn
+Resident Dim_LISSAGER_Organisation_VerserendeSager;
+
+MAP_Politikreds_Organisations_Key:
+Mapping load
+	 Organisation_Politikreds,
+	 Organisation_Key;
+Load Organisation_Politikreds,
+     min(Organisation_Key) as Organisation_Key
+Resident Dim_LISSAGER_Organisation_VerserendeSager
+Group by Organisation_Politikreds
+order by Organisation_Politikreds asc;
+
+MAP_AFDELING:
+Mapping Load 
+    Organisation_Key,
+   (Organisation_Orgkreds & '|' & Organisation_AfdelingsKode) as Afdeling_KEY
+Resident Dim_LISSAGER_Organisation_VerserendeSager;
+///$tab Variable defineres
+//Grunden til, at vi laver en ny qlikmart, som henter data direkte fra marten sagsbeholdning er (og ikke direkte fra datavarehuset, som tidligere), 
+//at der er blevet kodet nogle nye sammenhænge til LCIK sager og IT-økonomisk kriminalitet. Så for at få dem med hentes data direkte fra marten.
+
+Let vStartDato = AddMonths(YearStart(Today()-1),-48);
+Let vSlutDato = Date(today()-1,'DD-MM-YYYY');
+Let vIgaarKey = Date(today()-1,'YYYYMMDD');
+Let vSlutDato365 = Date(addmonths(MonthStart(today()-1),-12)-1,'DD-MM-YYYY');
+let _indexdate=today();
+set _startDate="01-01-2021";
+set _endDate="31-12-2024";
+
+TableKalender:
+LOAD
+ "Kalender_Key",
+    "Kalender_DatoKort"  
+Resident Dim_LISSAGER_Kalender
+Where Match  ( "Kalender_DatoKort" ,'$(vStartDato)');
+
+Let vDato = Peek('Kalender_Key');
+
+Drop Table TableKalender;
+///$tab Manual dim
+//Skabelse af ekstra dimensioner
+
+Temp:
+LOAD *,
+     (Organisation_Orgkreds & '|' & Organisation_AfdelingsKode) as Afdeling_KEY,
+          (Organisation_Orgkreds & '|' & Organisation_AfdelingsKode) as Afdeling_KEY_TMP,
+      Organisation_Politikreds                                                                                  as PolitikredsNr,
+      Organisation_AfdelingsNavn                                                                                as Sektion,
+      Organisation_Lvl3NrNavn                                                                                   as Afdeling,
+      Organisation_Lvl1NrNavn                                                                                   as Område                    
+Resident Dim_LISSAGER_Organisation_VerserendeSager;
+Drop table Dim_LISSAGER_Organisation_VerserendeSager;
+DROP Fields Organisation_Lvl4NrNavn, Organisation_Lvl5NrNavn,Organisation_Lvl6NrNavn, Organisation_PolpaiId, 
+            Organisation_Område_DS, Organisation_Afdeling_DS, Organisation_Sektion_DS, Organisation_PolitikredsNrNavn, 
+           /* Organisation_AfdelingsKode, */Organisation_AfdelingsKodeNavn, Organisation_VirksomhedOfficieltNrNavnKort;
+Rename table Temp to Dim_LISSAGER_Organisation_VerserendeSager;
+
+Concatenate (Dim_LISSAGER_Organisation_VerserendeSager)
+LOAD Afdeling_KEY,	
+    //AfdelingsNavn as Organisation_AfdelingsNavn, 
+    AfdelingsNavn as Sektion, 
+    NSK_FLAG= 1 as Organisation_Flag_NSK,
+    PolsasNiveau2 as Område, 
+    PolsasNiveau3 as Organisation_Lvl2NrNavn, 
+    PolsasNiveau4 as Afdeling, 
+    OrgKreds as Organisation_Orgkreds, 
+    PolitikredsNr as Organisation_Politikreds, 
+    ApplyMap('MAP_KREDSNAVN',PolitikredsNr) as Organisation_PolitikredsNavn, 
+    KredsKort as Organisation_VirksomhedOfficieltNavnKort, 
+	PolitikredsNr 
+FROM
+[..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Afdeling_POLSAS.qvd](qvd)
+where not Exists(Afdeling_KEY_TMP, Afdeling_KEY);
+Drop field Afdeling_KEY_TMP;
+
+TEMP:
+LOAD *,
+If(Organisation_Flag_NSK = 1, 'Vis kun NSK’s sager ','Vis ikke NSK’s sager ') as NSK_FLAG
+Resident Dim_LISSAGER_Organisation_VerserendeSager;
+Drop table Dim_LISSAGER_Organisation_VerserendeSager;
+Rename table TEMP to Dim_LISSAGER_Organisation_VerserendeSager;
+
+DROP Table Dim_LISSAGER_Organisation;
+
+HOVED:
+Load *
+Resident Dim_LISSAGER_Organisation_VerserendeSager;
+
+
+///$tab ManualLoad
+//Udbygning af udgangsfact
+
+FACT_TEMP:
+LOAD *,
+ApplyMap ('MAP_SAGSOMRÅDENR', Gerning_Key,-1) as SagsområdeNr,
+ApplyMap ('MAP_SAGSOMRÅDENAVN', Gerning_Key,-1) as Gerning_SagsOmraade,
+ApplyMap ('MAP_SAGSSTATUS', SagStatus_Key,-1) as Sagsstatus_KEY,
+ApplyMap ('MAP_SAGSSTATUSTEKST', SagStatus_Key,-1) as SagStatusKodeTekst,
+ApplyMap ('MAP_KRIMINALITETSART', Gerning_Key,-1) as KriminalitetsArt,
+ApplyMap ('MAP_KRIMINALITETSART', Gerning_Key,-1) as Gerning_KriminalitetsArt,
+ApplyMap ('MAP_KALENDER', Kalender_Key,-1) as ÅÅÅÅMM,
+ApplyMap ('MAP_KREDS', Organisation_Key,-1) as Afdeling_KEY,
+ApplyMap ('MAP_KREDSNR', Organisation_Key,-1) as KredsNr //,
+//ApplyMap ('MAP_ITØKO', JournalNr_Key,-1) as IT_Øko_filter
+Resident FACT;
+DROP TABLE FACT;
+RENAME TABLE FACT_TEMP to FACT;
+
+FACT_TEMP2:
+LOAD     Afdeling_KEY,
+         JournalNr_Key,
+         SagsområdeNr ,
+         Sagsstatus_KEY,
+		 SagStatusKodeTekst,         
+         KriminalitetsArt,
+         Gerning_KriminalitetsArt,
+         Gerning_SagsOmraade,
+         'Nej' as ItOekKrimUdv_Filter, //Tilføjet af MCH
+         ÅÅÅÅMM,
+         KredsNr,
+         Beholdning as BeholdningVUS,
+Sum(M_VersSagUdenSigt) as AntalVUS,
+Sum (Alder) as AlderVUS
+Resident FACT
+where Kalender_Key > 20201231
+Group by Afdeling_KEY,
+         JournalNr_Key,
+         SagsområdeNr,
+         Gerning_SagsOmraade,
+         KriminalitetsArt,
+         Gerning_KriminalitetsArt,
+         Sagsstatus_KEY,
+         SagStatusKodeTekst,
+         ÅÅÅÅMM,
+         KredsNr,
+         Beholdning ;
+DROP TABLE FACT;
+RENAME TABLE FACT_TEMP2 to FACT2;
+
+left join (FACT2)
+Load JournalNr_Key
+,ITOekonomiskKriminalitet_Filter as ItOekKrimOpr_Filter
+resident Dim_LISSAGER_JournalNr_GDPR; 
+drop Table Dim_LISSAGER_JournalNr_GDPR;
+
+Concatenate (FACT2)
+load *,
+;
+load ApplyMap ('MAP_RAKREDS', Afdeling_KEY,-1) as KredsNr,
+     Afdeling_KEY, 
+     Sagstrin, 
+     [Sagstrin - detaljeret] AS AfslutningsType,
+     SagsområdeNr , 
+     Sagsstatus_KEY, 
+     KriminalitetsArt, 
+     ÅÅÅÅMM, 
+     AlderVersAnm,
+     AlderFraAnmeldelseVers, 
+     AlderVersSig, 
+     AlderVersTil, 
+     AntalVersForhold, 
+     AntalVersKomplekser, 
+     if([ItOekKrimOpr_FLAG]=1,'Ja','Nej')as ItOekKrimOpr_Filter,
+     if([ItOekKrimUdv_FLAG]=1,'Ja','Nej')as ItOekKrimUdv_Filter,
+     Niveau, 
+    // AlderFraAnmeldelseVers,
+     AlderVers, 
+     AntalVers, 
+     Sagsbehandlingstid_AnmTilAfg, 
+     AntalAnmTilAfg, 
+     Sagsbehandlingstid_AnmTilAfs, 
+     AntalAnmTilAfs,  
+     Sagsbehandlingstid_AnmTilAfgÅTD, 
+     AntalAnmTilAfgÅTD, 
+     Sagsbehandlingstid_AnmTilAfsÅTD, 
+     AntalAnmTilAfsÅTD
+FROM
+[..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_MR_QVD_GEN_2024.qvd]
+//[..\..\..\5_DCA\19_QlikApplication\Mappe til temporere rapportert der ligges over\test.qvd]
+(qvd);
+
+//ApplyMap ('MAP_KREDSNR', Organisation_Key,-1) as KredsNr,
+
+Left Join (Dim_LISSAGER_Organisation_VerserendeSager) 
+load distinct Afdeling_KEY,   
+     AnklageMyndighed_FLAG, 
+     AnklagemyndighedTekst
+FROM
+[..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Afdeling_POLSAS.qvd]
+(qvd);
+
+Left Join (FACT2) 
+load Distinct KriminalitetsArt, 
+     Personfarlig_FLAG,
+     if(Personfarlig_FLAG=0,'Udelad PFU sager','PFU sager') as PersonFarligUdvidet
+FROM
+[..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_MR_QVD_GEN_2024.qvd]
+//[..\..\..\5_DCA\19_QlikApplication\Mappe til temporere rapportert der ligges over\test.qvd]
+(qvd);
+
+Vers_SIGT_KPI:
+Load
+	PolitiKredsNr,
+	Year('$(s_DWHDato)')&num(Month('$(s_DWHDato)'),00) as ÅÅÅÅMM,
+    JourPers_KEY, 
+    HF_SagsKompleks_KEY,
+    if(VerserendeSigtelse_FLAG = 1, 'Sigtelser','Tiltaler') as Sagstrin,
+    Sagsstatus_KEY,
+    if([ItOekKrimOpr_FLAG]=1,'Ja','Nej')as ItOekKrimOpr_Filter,
+    if([ItOekKrimUdv_FLAG]=1,'Ja','Nej')as ItOekKrimUdv_Filter,
+	If(Tiltale_FLAG=1, TiltaleGerningskode_KEY,
+		If(Sigtelse_FLAG=1, SigtelseGerningskode_KEY, 
+								AnmeldelseGerningskode_KEY)) as Gerningskode_KEY,
+	if(isnull(PolitiKredsNr)=0,SenesteAfdeling_KEY,OrgKreds&'|KX') as Afdeling_KEY
+FROM [..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_RP_SagerOgForhold.qvd](qvd)
+where (VerserendeSigtelse_FLAG = 1 or VerserendeTiltale_FLAG = 1) //and StorSag_FLAG=0 
+;
+
+left join (Vers_SIGT_KPI)
+LOAD 
+	Gerningskode_KEY, 
+	SagsområdeNr,
+	KriminalitetsArt, 
+	ATK_FLAG,
+	Meldepligt_FLAG,
+    Personfarlig_FLAG
+FROM
+[..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Gerningskoder.qvd] (qvd);
+
+Left join (FACT2)
+Load
+     Sagsstatus_KEY,
+     count(distinct HF_SagsKompleks_KEY) as AntalVersTiltKomplekser_Sagsstatus
+Resident Vers_SIGT_KPI
+where (ATK_FLAG = 0 and Meldepligt_FLAG = 0) and Sagstrin = 'Tiltaler' 
+group by Sagsstatus_KEY
+;
+Left join (FACT2)
+Load
+     Sagsstatus_KEY,
+     count(distinct HF_SagsKompleks_KEY) as AntalVersSigKomplekser_Sagsstatus
+Resident Vers_SIGT_KPI
+where (ATK_FLAG = 0 and Meldepligt_FLAG = 0) and Sagstrin = 'Sigtelser' 
+group by Sagsstatus_KEY
+;
+
+Left join (FACT2)
+Load
+     SagsområdeNr ,
+     count(distinct HF_SagsKompleks_KEY) as AntalVersTiltKomplekser_SagsområdeNr
+Resident Vers_SIGT_KPI
+where (ATK_FLAG = 0 and Meldepligt_FLAG = 0) and Sagstrin = 'Tiltaler' 
+group by SagsområdeNr
+;
+Left join (FACT2)
+Load
+     SagsområdeNr ,
+     count(distinct HF_SagsKompleks_KEY) as AntalVersSigKomplekser_SagsområdeNr
+Resident Vers_SIGT_KPI
+where (ATK_FLAG = 0 and Meldepligt_FLAG = 0) and Sagstrin = 'Sigtelser' 
+group by SagsområdeNr
+;
+
+Left join (FACT2)
+Load
+     Afdeling_KEY,
+     count(distinct HF_SagsKompleks_KEY) as AntalVersTiltKomplekser_Afdeling
+Resident Vers_SIGT_KPI
+where (ATK_FLAG = 0 and Meldepligt_FLAG = 0) and Sagstrin = 'Tiltaler'  
+group by Afdeling_KEY
+;
+Left join (FACT2)
+Load
+     Afdeling_KEY,
+     count(distinct HF_SagsKompleks_KEY) as AntalVersSigKomplekser_Afdeling
+Resident Vers_SIGT_KPI
+where (ATK_FLAG = 0 and Meldepligt_FLAG = 0) and Sagstrin = 'Sigtelser'  
+group by Afdeling_KEY
+;
+
+Left join (FACT2)
+Load
+     PolitiKredsNr as KredsNr,
+     count(distinct HF_SagsKompleks_KEY) as AntalVersTiltKomplekser_PolitiKredsNr
+Resident Vers_SIGT_KPI
+where (ATK_FLAG = 0 and Meldepligt_FLAG = 0) and Sagstrin = 'Tiltaler'  
+group by PolitiKredsNr
+;
+Left join (FACT2)
+Load
+     PolitiKredsNr as KredsNr,
+     count(distinct HF_SagsKompleks_KEY) as AntalVersSigKomplekser_PolitiKredsNr
+Resident Vers_SIGT_KPI
+where (ATK_FLAG = 0 and Meldepligt_FLAG = 0) and Sagstrin = 'Sigtelser'  
+group by PolitiKredsNr;
+
+DROP Table Vers_SIGT_KPI;
+
+Left Join (Dim_LISSAGER_Organisation_VerserendeSager)
+LOAD Organisation_Politikreds, 
+     RapportAnsvar
+FROM
+[Rapportansvarlige kredse.xlsx]
+(ooxml, embedded labels, table is Kontakt);
+
+//Her udfindes alle de kredsbrugere, der skal have adgang til rapporten.
+BRUGERE:
+load Users_Nickname as Adgangsnavn,
+     IF (SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1) > 15, '-1', SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1))  as Organisation_Politikreds,
+     Users_Company as Organisation_Forkortelse,
+     Right(Info_ADGruppeInfo_Wrxkode,5) as WrxNr,
+     'Kredsbruger' as AdgangsNiveau
+from [..\..\..\1_KOS\26_NPrinting\262_MasterApplication\2623_RecipientMasterOutput\Recipients_ADgroups_Danskpoliti.qvd] (qvd)
+where Info_ADGruppeInfo_ADgruppe_Navn = 'Profil_Qlik_FLA_Kredsrapport' and SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1) <= 12;
+
+//Her udfindes alle de landsbrugere, der skal have adgang til rapporten og kunne se alle kredesenes data.
+FOR i = 1 TO 12
+Concatenate(BRUGERE)
+LANDSBRUGERE:
+load 
+	Users_Nickname as Adgangsnavn,
+	$(i) AS  Organisation_Politikreds,
+     //IF (SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1) > 15, '-1', SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1))  as DK_Organisation_Politikreds,
+     Users_Company as Organisation_Forkortelse,
+     Right(Info_ADGruppeInfo_Wrxkode,5) as WrxNr,
+     'Landsbruger' as AdgangsNiveau
+from [..\..\..\1_KOS\26_NPrinting\262_MasterApplication\2623_RecipientMasterOutput\Recipients_ADgroups_Danskpoliti.qvd] (qvd)
+where Info_ADGruppeInfo_ADgruppe_Navn = 'Profil_Qlik_FLA_Kredsrapport' and SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1) > 12
+and Users_Nickname <> 'Mads Chrøis';
+Concatenate (BRUGERE)
+Load * inline  [
+Adgangsnavn, Organisation_Politikreds, Organisation_Forkortelse, WrxNr, AdgangsNiveau
+'Lene Marie Nørremark',$(i),KIT,'29672','Landsbruger'
+'Niels Kjær Jørgensen',$(i),KIT,'46032','Landsbruger'
+'Mads Chrøis',  11, CDA,'39723','Kredsbruger'
+'Peter Fensholm', 5, KIT,'26916','Kredsbruger'
+'Sune Messmann',$(i),KIT,'41513','Landsbruger'
+'Emil Krogsgaard Bjørndal',2,ØJYL,'52739','Kredsbruger'
+'Maja Lykke Larsen',2,ØJYL,'53415','Kredsbruger'
+'Oliver Salby',2,ØJYL,'53438','Kredsbruger'
+'Emma Sophie Thatt Johnston',2,ØJYL,'53436','Kredsbruger'
+'POLITINET\S-QLIKVIEW-PRINT',$(i),0,'','Landsbruger'
+];
+//$(i) Organisatorisk placering
+
+NEXT i;
+
+Left Join (Dim_LISSAGER_Organisation_VerserendeSager)
+LOAD Organisation_Politikreds, 
+     Adgangsnavn, 
+     Organisation_Forkortelse,
+     WrxNr,
+     AdgangsNiveau
+Resident BRUGERE;
+DROP TABLE BRUGERE;
+
+//Her udfindes alle brugerroller, der har adgang til rapporten for overblik over de brugere der er tilmeldt rapporten.
+FLAROLLER:
+LOAD 
+Users_Nickname as AdgangsNavn,
+Users_Company as OrganisationKort,
+RIGHT(Info_ADGruppeInfo_Wrxkode,5) as WrxNr,
+Info_ADGruppeInfo_ADgruppe_Navn as AdgangsProfil,
+       if(Info_ADGruppeInfo_ADgruppe_Navn='Profil_Qlik_FLA_Kredsrapport',1,   
+       if(Info_ADGruppeInfo_ADgruppe_Navn='Profil_Qlik_FLA_Sagsbeholdning',2,
+       if(Info_ADGruppeInfo_ADgruppe_Navn='Profil_Qlik_ANKL_maal_resultatplan',3,  
+       if(Info_ADGruppeInfo_ADgruppe_Navn='Profil_QLVrap_R2200_AdminSectionAccess',4  
+       )))) as AdgangsRolleNr
+//from [..\..\15_QlikMart\5014_POLPRO_Version2\Recipients_ADgroups_Danskpoliti.qvd] (qvd)
+from [..\..\..\1_KOS\26_NPrinting\262_MasterApplication\2623_RecipientMasterOutput\Recipients_ADgroups_Danskpoliti.qvd] (qvd)
+where (Info_ADGruppeInfo_ADgruppe_Navn='Profil_Qlik_FLA_Kredsrapport' or
+       Info_ADGruppeInfo_ADgruppe_Navn='Profil_Qlik_FLA_Sagsbeholdning' or
+       Info_ADGruppeInfo_ADgruppe_Navn='Profil_Qlik_ANKL_maal_resultatplan' or
+       Info_ADGruppeInfo_ADgruppe_Navn='Profil_QLVrap_R2500_AdminSectionAccess'   );
+
+FLAADGANGE:
+Left Join (Dim_LISSAGER_Organisation_VerserendeSager)
+LOAD 
+AdgangsNavn,
+WrxNr,
+OrganisationKort,
+AdgangsProfil ,
+AdgangsRolleNr ,
+if(AdgangsProfil='Profil_Qlik_FLA_Kredsrapport',1,0) as Hovedapplikation,
+if(AdgangsProfil='Profil_Qlik_FLA_Sagsbeholdning',1,0) as POapplikation,
+if(AdgangsProfil='Profil_Qlik_ANKL_maal_resultatplan',1,0) as RAapplikation,
+if(AdgangsProfil='Profil_QLVrap_R2500_AdminSectionAccess',1,0) as Udvikling
+
+Resident FLAROLLER;
+Drop Table FLAROLLER;
+
+Left Join (FACT2)
+LOAD Distinct SagsområdeNr , 
+     SagsområdeKort, 
+     MID(Sagsområde,4) AS Sagsområde_filter,
+     Sagsområde_SORT
+FROM
+[..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Gerningskoder.qvd]
+(qvd);
+
+KALENDER:
+LOAD ÅÅÅÅMM,
+ LEFT(ÅÅÅÅMM,4)as År,
+ RIGHT(ÅÅÅÅMM,2)as Måned#,
+ RIGHT(ÅÅÅÅMM,2) & '' & LEFT(ÅÅÅÅMM,4)  as Måned#År,
+ Capitalize(  Month(MakeDate(left( ÅÅÅÅMM, 4), right (ÅÅÅÅMM, 2),1))) as Måned,
+ Capitalize(  MonthName(MakeDate(left( ÅÅÅÅMM, 4), right (ÅÅÅÅMM, 2),1))) as MånedÅr,
+ LEFT(ÅÅÅÅMM,4)as Kalender_Aar,
+ Capitalize(  Month(MakeDate(left( ÅÅÅÅMM, 4), right (ÅÅÅÅMM, 2),1))) as Kalender_MaanedAfAarNavnKort
+Resident FACT2;
+
+Drop tables	Dim_LISSAGER_Kalender,Dim_LISSAGER_Gerning_VerserendeSager, Dim_LISSAGER_SagStatus_VerserendeSager;
+     
+//Opdateringsstempel   
+DWHDATO:
+LOAD DWHDATO
+FROM
+[..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_RP_DWH_Date.QVD] 
+(qvd);
+
+Let s_DWHDato = peek('DWHDATO');
+Drop Table DWHDATO;
+///$tab Excel Load 1
+//Indlæsning af måltal fra Rigspolitiet og Rigsadvokaten
+////Måltal fra excel-fil til kredsrapportering. Ark: Sager_uden_sigtelse_mnd_graf1:
+MÅLPOLITIANTAL:
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Antal_Måltal_Måned_Kreds as M_Antal_PolMål_Kreds
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sagsbeholdning.xlsx
+(ooxml, embedded labels, table is Sager_uden_sigtelse_mnd_graf1);
+
+////Måltal fra excel-fil til kredsrapportering. Ark: Sager_uden_sigtelse_mnd_graf2:
+Concatenate(MÅLPOLITIANTAL)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Alder_Måltal_Måned_Kreds as M_Alder_PolMål_Kreds
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sagsbeholdning.xlsx
+(ooxml, embedded labels, table is Sager_uden_sigtelse_mnd_graf2);
+
+Concatenate (MÅLPOLITIANTAL)
+LOAD dato & '|' & KredsNr as ÅrKreds_Key, 
+     [SABH, 180 dage], 
+     [SABH, 160 dage]
+FROM
+[..\..\..\5_DCA\19_QlikApplication\00_SOURCE\maal2024.xlsx]
+(ooxml, embedded labels, table is Ark1)
+Where KredsNr > 0;
+
+LANDSMÅL:
+LOAD dato as År, 
+     [SABH, 180 dage] as [SABH_LAND, 180 dage], 
+     [SABH, 160 dage] as [SABH_LAND, 160 dage]
+FROM
+[..\..\..\5_DCA\19_QlikApplication\00_SOURCE\maal2024.xlsx]
+(ooxml, embedded labels, table is Ark1)
+Where KredsNr = 0;
+
+//Indlæsning af Sund Drift Spænd fra Rigspolitiet og Rigsadvokaten
+//Spænd fra excel-fil til kredsrapportering. 
+
+SPÆNDSAMLET:
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Antal_Spænd_Bund_Ind1 as M_Antal_Spænd1_bund,
+     Antal_Spænd_Top_Ind1 as M_Antal_Spænd1_top
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2024.xlsx
+(ooxml, embedded labels, table is Sager_uden_sigtelse_antal);
+
+Concatenate (SPÆNDSAMLET)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Alder_Spænd_Bund_Ind1 as M_Alder_Spænd1_bund,
+     Alder_Spænd_Top_Ind1 as M_Alder_Spænd1_top
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2024.xlsx
+(ooxml, embedded labels, table is Sager_uden_sigtelse_alder);
+
+Concatenate (SPÆNDSAMLET)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Antal_Spænd_Bund_Ind2 as M_Antal_Spænd2_bund,
+     Antal_Spænd_Top_Ind2 as M_Antal_Spænd2_top
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2024.xlsx
+(ooxml, embedded labels, table is Sager_uden_tiltale_antal);
+
+Concatenate (SPÆNDSAMLET)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Alder_Spænd_Bund_Ind2 as M_Alder_Spænd2_bund,
+     Alder_Spænd_Top_Ind2 as M_Alder_Spænd2_top
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2024.xlsx
+(ooxml, embedded labels, table is Sager_uden_tiltale_alder);
+
+Concatenate (SPÆNDSAMLET)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Alder_Spænd_Bund_Ind2A as M_Alder_Spænd2_bund_anm,
+     Alder_Spænd_Top_Ind2A as M_Alder_Spænd2_top_anm
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2024.xlsx
+(ooxml, embedded labels, table is Sager_uden_tiltale_alder_A);
+
+Concatenate (SPÆNDSAMLET)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Antal_Spænd_Bund_Ind3 as M_Antal_Spænd3_bund,
+     Antal_Spænd_Top_Ind3 as M_Antal_Spænd3_top
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2024.xlsx
+(ooxml, embedded labels, table is Sager_uden_tiltale_komplekser);
+
+Concatenate (SPÆNDSAMLET)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Antal_Spænd_Bund_Ind4 as M_Antal_Spænd4_bund,
+     Antal_Spænd_Top_Ind4 as M_Antal_Spænd4_top
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2024.xlsx
+(ooxml, embedded labels, table is Sager_uden_afgørelse_komplekser);
+
+RENAME Table MÅLPOLITIANTAL to MÅLSAMLET;
+
+FACT2_TEMP:
+LOAD *,  LEFT(ÅÅÅÅMM,4) & '|' & KredsNr as ÅrKreds_Key
+Resident FACT2;
+DROP TABLE FACT2;
+RENAME TABLE FACT2_TEMP TO FACT2;
+
+//Opdateringsstempel   
+DWHDATO:
+LOAD DWHDATO
+FROM
+[..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_RP_DWH_Date.QVD] 
+(qvd);
+
+MÅLPOLITIKREDSANTAL:
+Load //År & '|' & Kreds as ÅrKreds_Key,
+     Organisation,
+     KredsAfdelingsNiveau,
+     Antal_Sigtelse_Måned_Kreds_Afdeling as M_Antal_KredsMål
+FROM
+[..\..\..\3_PO\15_QlikMart\4100_Kreds_Ledelsesinformation\Kredsmål_2023.xlsx]
+(ooxml, embedded labels, table is Beholdning_Afdeling_Sigt);
+
+////Måltal fra excel-fil til kredsrapportering. Ark: Alder_Afdeling_Sigt:
+Concatenate(MÅLPOLITIKREDSANTAL)
+Load //År & '|' & Kreds as ÅrKreds_Key,
+     Organisation,
+     KredsAfdelingsNiveau,
+     Alder_Sigtelse_Måned_Kreds_Afdeling as M_Alder_KredsMål
+FROM
+[..\..\..\3_PO\15_QlikMart\4100_Kreds_Ledelsesinformation\Kredsmål_2023.xlsx]
+(ooxml, embedded labels, table is Alder_Afdeling_Sigt);
+
+////Måltal fra excel-fil til kredsrapportering. Ark: Beholdning_Afdeling_Tilt:
+Concatenate(MÅLPOLITIKREDSANTAL)
+Load //År & '|' & Kreds as ÅrKreds_Key,
+     Organisation,
+     KredsAfdelingsNiveau,
+     Antal_Tiltale_Måned_Kreds_Afdeling as M_RA_Antal_KredsMål
+FROM
+[..\..\..\3_PO\15_QlikMart\4100_Kreds_Ledelsesinformation\Kredsmål_2023.xlsx]
+(ooxml, embedded labels, table is Beholdning_Afdeling_Tilt);
+
+////Måltal fra excel-fil til kredsrapportering. Ark: Alder_Afdeling_Tilt:
+Concatenate(MÅLPOLITIKREDSANTAL)
+Load //År & '|' & Kreds as ÅrKreds_Key,
+     Organisation,
+     KredsAfdelingsNiveau,
+     Alder_Tiltale_Måned_Kreds_Afdeling as M_RA_Alder_KredsMål
+FROM
+[..\..\..\3_PO\15_QlikMart\4100_Kreds_Ledelsesinformation\Kredsmål_2023.xlsx]
+(ooxml, embedded labels, table is Alder_Afdeling_Tilt);
+
+AntalNiveauer:
+LOAD  Distinct KredsAfdelingsNiveau
+Resident MÅLPOLITIKREDSANTAL;
+Let AntalNiveau = NoOfRows('AntalNiveauer') ;
+
+For i= 0 to NoOfRows('AntalNiveauer')-1
+Let vPolsasNiveau = Peek('KredsAfdelingsNiveau', i, 'AntalNiveauer');
+Left join (Dim_LISSAGER_Organisation_VerserendeSager)
+LOAD Organisation as Organisation_Lvl$(vPolsasNiveau)NrNavn,
+     M_Antal_KredsMål as M_Antal_KredsMål$(vPolsasNiveau)
+Resident MÅLPOLITIKREDSANTAL
+where KredsAfdelingsNiveau = $(vPolsasNiveau) and len(trim(M_Antal_KredsMål))>0
+;
+Next i
+  
+For i= 0 to NoOfRows('AntalNiveauer')-1
+Let vPolsasNiveau = Peek('KredsAfdelingsNiveau', i, 'AntalNiveauer');
+Left join (Dim_LISSAGER_Organisation_VerserendeSager)
+LOAD Organisation as Organisation_Lvl$(vPolsasNiveau)NrNavn,
+     M_Alder_KredsMål as M_Alder_KredsMål$(vPolsasNiveau)
+Resident MÅLPOLITIKREDSANTAL
+where KredsAfdelingsNiveau = $(vPolsasNiveau) and len(trim(M_Alder_KredsMål))>0
+;
+
+Next i 
+  
+For i= 0 to NoOfRows('AntalNiveauer')-1
+Let vPolsasNiveau = Peek('KredsAfdelingsNiveau', i, 'AntalNiveauer');
+Left join (Dim_LISSAGER_Organisation_VerserendeSager)
+LOAD Organisation as Organisation_Lvl$(vPolsasNiveau)NrNavn,
+     M_RA_Antal_KredsMål as M_RA_Antal_KredsMål$(vPolsasNiveau)
+Resident MÅLPOLITIKREDSANTAL
+where KredsAfdelingsNiveau = $(vPolsasNiveau) and len(trim(M_RA_Antal_KredsMål))>0
+;
+Next i 
+ 
+For i= 0 to NoOfRows('AntalNiveauer')-1
+Let vPolsasNiveau = Peek('KredsAfdelingsNiveau', i, 'AntalNiveauer');
+Left join (Dim_LISSAGER_Organisation_VerserendeSager)
+LOAD Organisation as Organisation_Lvl$(vPolsasNiveau)NrNavn,
+     M_RA_Alder_KredsMål as M_RA_Alder_KredsMål$(vPolsasNiveau)
+Resident MÅLPOLITIKREDSANTAL
+where KredsAfdelingsNiveau = $(vPolsasNiveau) and len(trim(M_RA_Alder_KredsMål))>0
+;
+Next i 
+ 
+ dumpdata:
+ load * Inline [dump] ; 
+ 
+For i= 0 to NoOfRows('AntalNiveauer')-1
+Let vPolsasNiveau = Peek('KredsAfdelingsNiveau', i, 'AntalNiveauer');
+Concatenate(dumpdata)
+
+Load distinct Afdeling_KEY,
+M_Antal_KredsMål$(vPolsasNiveau) as M_Antal_KredsMål,
+M_Alder_KredsMål$(vPolsasNiveau) as M_Alder_KredsMål,
+M_RA_Antal_KredsMål$(vPolsasNiveau) as M_RA_Antal_KredsMål,
+M_RA_Alder_KredsMål$(vPolsasNiveau) as M_RA_Alder_KredsMål
+Resident Dim_LISSAGER_Organisation_VerserendeSager
+where 
+len(trim( M_Antal_KredsMål$(vPolsasNiveau)))>0 or
+len(trim( M_Alder_KredsMål$(vPolsasNiveau)))>0 or
+len(trim( M_RA_Antal_KredsMål$(vPolsasNiveau)))>0 or
+len(trim( M_RA_Alder_KredsMål$(vPolsasNiveau)))>0 
+;
+
+Next i;
+drop field dump;
+
+For i= 0 to NoOfRows('AntalNiveauer')-1
+Let vPolsasNiveau = Peek('KredsAfdelingsNiveau', i, 'AntalNiveauer');
+
+drop fields M_Antal_KredsMål$(vPolsasNiveau),  M_Alder_KredsMål$(vPolsasNiveau), M_RA_Antal_KredsMål$(vPolsasNiveau), M_RA_Alder_KredsMål$(vPolsasNiveau);
+next i ;
+
+Left join (Dim_LISSAGER_Organisation_VerserendeSager)
+Load * resident dumpdata;
+
+drop table dumpdata;
+drop tables MÅLPOLITIKREDSANTAL,AntalNiveauer;
+
+SoF:
+Load 
+     HF_SagsKompleks_KEY, 
+	 '$(s_DWHDato)' as DATO_KEY,
+	 left(Date(Date#('$(s_DWHDato)', 'YYYY-MM-DD'),'YYYYMMDD'),6) as ÅÅÅÅMM ,
+	 Right(Journal_KEY,16) as Journal,
+	 //If(left(Right(Journal_KEY,16),4)='01LC','Kun LCIK','Uden LCIK') as LCIK_FLG,	 
+     JourPers_KEY, 
+     Person_KEY, 
+	 PolitiKredsNr as KredsNr,
+   //  OrgKreds, 
+	 If(Tiltale_FLAG=1, TiltaleGerningskode_KEY,
+		If(Sigtelse_FLAG=1, SigtelseGerningskode_KEY, AnmeldelseGerningskode_KEY)) as Gerningskode_KEY,
+     SenesteAfdeling_KEY as Afdeling_KEY, 
+     Sagsstatus_KEY, 
+     Tilhoersforhold_KEY, 
+     SagIPolsas_DATO, 
+     SigtelseIPolsas_DATO, 
+     Sagudskilt_DATO, 
+     Gernings_DATO, 
+     Date(Anmeldelse_DATO) as Anmeldelse_DATO, 
+     Date(Sigtelse_DATO) as Sigtelse_DATO, 
+     Date(Tiltale_DATO) as Tiltale_DATO,
+     VerserendeSagsplacering_FLAG, 
+     VerserendeAnmeldelse_FLAG, 
+     VerserendeSigtelse_FLAG, 
+     VerserendeTiltale_FLAG, 
+     Udeblivelsesdom_FLAG, 
+     FaeldendeAfg_FLAG, 	 
+     if([ItOekKrimOpr_FLAG]=1,'Ja','Nej')as ItOekKrimOpr_Filter,
+     if([ItOekKrimUdv_FLAG]=1,'Ja','Nej')as ItOekKrimUdv_Filter,
+     StorSag_FLAG, //CR:0437
+	 [Store sager]
+      ,'AktuelVers' as Datasaet
+	  ,'$(s_DWHDato)' - Anmeldelse_DATO as AnmeldelsesAlder
+     ,'$(s_DWHDato)' - Sigtelse_DATO as SigtelsesAlder
+	 ,'$(s_DWHDato)' - Tiltale_DATO as TiltaleAlder
+	 ,'$(s_DWHDato)' - Gernings_DATO as GerningsAlder
+	 ,if('$(s_DWHDato)' - Sigtelse_DATO < 85, 'Under 85 dage', if('$(s_DWHDato)' - Sigtelse_DATO < 170, '85-170 dage', 'Over 170 dage' )) as SigtetAlderGruppering
+	 ,if('$(s_DWHDato)' - Tiltale_DATO < 85, 'Under 85 dage', if('$(s_DWHDato)' - Tiltale_DATO < 170, '85-170 dage', 'Over 170 dage' )) as TiltaleAlderGruppering
+	 
+FROM [..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_RP_SagerOgForhold.qvd](qvd)
+where  VerserendeSigtelse_FLAG = 1 or VerserendeTiltale_FLAG = 1 ;
+
+Left join (SoF)
+LOAD Gerningskode_KEY
+     ,GerningskodeNr 
+     ,GerningskodeTekst
+     ,Gerningskode
+     ,Sagsområde
+     ,SagsområdeNr 
+     ,SagsområdeKort
+     ,Personfarlig_FLAG 
+     ,ATK_FLAG
+	 ,Meldepligt_FLAG
+FROM
+[..\..\..\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Gerningskoder.qvd] (qvd)
+;
+
+Concatenate (FACT2)
+Load * Resident SoF
+where (ATK_FLAG = 0 and Meldepligt_FLAG = 0) ;
+Drop table SoF;
+
+CALL ENDLOG(QVD_FILE);
+///$tab Sandkasse
+//Indlæsning af Sund Drift Spænd fra Rigspolitiet og Rigsadvokaten
+//Spænd fra excel-fil til kredsrapportering for afdelinger. 
+
+SPÆNDSAMLETAFDELING:
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Antal_Spænd_Bund_Ind1 as M_Antal_Spænd1_bund_afd,
+     Antal_Spænd_Top_Ind1 as M_Antal_Spænd1_top_afd
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2025 afdeling.xlsx
+(ooxml, embedded labels, table is Sager_uden_sigtelse_antal);
+
+Concatenate (SPÆNDSAMLETAFDELING)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Alder_Spænd_Bund_Ind1 as M_Alder_Spænd1_bund_afd,
+     Alder_Spænd_Top_Ind1 as M_Alder_Spænd1_top_afd
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2025 afdeling.xlsx
+(ooxml, embedded labels, table is Sager_uden_sigtelse_alder);
+
+Concatenate (SPÆNDSAMLETAFDELING)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Antal_Spænd_Bund_Ind2 as M_Antal_Spænd2_bund_afd,
+     Antal_Spænd_Top_Ind2 as M_Antal_Spænd2_top_afd
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2025 afdeling.xlsx
+(ooxml, embedded labels, table is Sager_uden_tiltale_antal);
+
+Concatenate (SPÆNDSAMLETAFDELING)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Alder_Spænd_Bund_Ind2 as M_Alder_Spænd2_bund_afd,
+     Alder_Spænd_Top_Ind2 as M_Alder_Spænd2_top_afd
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2025 afdeling.xlsx
+(ooxml, embedded labels, table is Sager_uden_tiltale_alder);
+
+Concatenate (SPÆNDSAMLETAFDELING)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Antal_Spænd_Bund_Ind3 as M_Antal_Spænd3_bund_afd,
+     Antal_Spænd_Top_Ind3 as M_Antal_Spænd3_top_afd
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2025 afdeling.xlsx
+(ooxml, embedded labels, table is Sager_uden_tiltale_komplekser);
+
+Concatenate (SPÆNDSAMLETAFDELING)
+Load År & '|' & Kreds as ÅrKreds_Key,
+     Antal_Spænd_Bund_Ind4 as M_Antal_Spænd4_bund_afd,
+     Antal_Spænd_Top_Ind4 as M_Antal_Spænd4_top_afd
+FROM
+\\$(v_DataHub_ServerName)\InputData$\KoncernDashboard\Sund drift spænd 2025 afdeling.xlsx
+(ooxml, embedded labels, table is Sager_uden_afgørelse_komplekser);
+///$tab PO Detaljer
+//Facts and Dimensions
+//Indlæses manuelt for at skabe en dataø med detaljer for politiets data 
+
+SET vBeholdning = 'AKTUEL';
+SET vf_PathFileName	='[..\..\..\1_KOS\14_EDW\1403_Datakilder\';
+PO_FACT:
+Qualify *;
+Unqualify PO_GERNING_VERS.Gerning_Key, PO_KAL.Kalender_Key, PO_SAGOP.KalenderSagsoprettelse_Key, PO_SAGSBEHANDLER.Sagsbehandler_Key, 
+          PO_SAGSBEHANDLER.Sagsbehandler_Key,PO_JOURNAL.JournalNr_Key, JournalNr_Key,PO_STATUS.SagStatus_Key,Afdeling_KEY,Gerning_Key;
+Load *,
+ApplyMap ('MAP_AFDELING', Organisation_Key,-1) as Afdeling_KEY,
+//Organisation_Key as PO.Organisation_Key,
+JournalNr_Key as PO_JOURNAL.JournalNr_Key,
+Gerning_Key as PO_GERNING_VERS.Gerning_Key,
+Kalender_Key as PO_KAL.Kalender_Key,
+KalenderSagsoprettelse_Key as PO_SAGOP.KalenderSagsoprettelse_Key,
+SagStatus_Key as PO_STATUS.SagStatus_Key,   
+Sagsbehandler_Key as PO_SAGSBEHANDLER.Sagsbehandler_Key
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Fact_LISSAGER_VerserendeSager_FLA2024.qvd] (qvd);
+
+//PO_FACT2:
+//UNQUALIFY PO_TYPE.Anmeldelsestype_Key, PO_KALMALM.KalenderAnmeldt_Key, PO_JOURNAL.JournalNr_Key;
+//lOAD JournalNr_Key as PO_JOURNAL.JournalNr_Key,
+//Anmeldelsestype_Key as PO_TYPE.Anmeldelsestype_Key,
+//AnmTid_Key,
+//Kalender_Key as PO_KALMALM.KalenderAnmeldt_Key
+//From [..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_Lissager\Fact_LISSAGER_Anmeldelser.qvd](qvd)
+//Where Exists (PO_JOURNAL.JournalNr_Key);
+//
+//Left join (PO_FACT)
+//LOAD *
+//RESIDENT PO_FACT2;
+//drop table PO_FACT2;
+//Findes ikke i DM
+
+UNQUALIFY *;
+Left join (PO_FACT)
+LOAD
+Gerning_Key
+,Gerning_SagsOmraade AS Sagsområde_filter
+FROM 
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_Gerning.qvd] (qvd)
+Where Exists (Gerning_Key);
+
+QUALIFY *;
+Unqualify PO_GERNING_VERS.Gerning_Key, PO_KAL.Kalender_Key, PO_SAGOP.KalenderSagsoprettelse_Key, PO_SAGSBEHANDLER.Sagsbehandler_Key, 
+          PO_SAGSBEHANDLER.Sagsbehandler_Key,PO_JOURNAL.JournalNr_Key, JournalNr_Key,PO_STATUS.SagStatus_Key,Afdeling_KEY,Gerning_Key;
+
+PO_GERNING:
+UNQUALIFY Gerning_Key;
+Load *
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_Gerning.qvd] (qvd)
+Where Exists (Gerning_Key);
+
+PO_GERNING_VERS:
+UNQUALIFY Gerning_Key;
+Load *, Gerning_Sagsomraadenr as SagsområdeNr
+ FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_Gerning_VerserendeSager.qvd] (qvd)
+Where Exists (Gerning_Key);
+
+PO_KAL:
+//UNQUALIFY ÅÅÅÅMM;
+Load *
+//(left(Kalender_Key,6)) as ÅÅÅÅMM 
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_Kalender.qvd] (qvd);
+
+PO_SAGOP:
+Load *
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_KalenderSagsoprettelse.qvd] (qvd);
+
+PO_JOURNAL:
+Load *
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_JournalNr.qvd] (qvd)
+Where Exists (JournalNr_Key);
+
+PO:
+UNQUALIFY  Adgangsnavn,Organisation_Forkortelse, WrxNr,AdgangsNiveau, Afdeling_KEY;
+Load *, (Organisation_Orgkreds & '|' & Organisation_AfdelingsKode) as Afdeling_KEY
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_Organisation_VerserendeSager.qvd] (qvd)
+Where Exists (Organisation_Key);
+
+PO_STATUS:
+UNQUALIFY Sagsstatus_Key;
+Load *
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_SagStatus_VerserendeSager.qvd] (qvd);
+
+PO_SAGSBEHANDLER:
+Load *
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_Sagsbehandler.qvd] (qvd);
+
+PO_TID:
+Load *
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_AnmTid.qvd] (qvd);
+
+//PO_TYPE:
+//UNQUALIFY PO_FACT.Anmeldelsestype_Key;
+//Load *,
+//Anmeldelsestype_Key as PO_TYPE.Anmeldelsestype_Key
+//FROM
+//[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_Anmeldelsestype.qvd] (qvd);
+
+PO_KALALM:
+UNQUALIFY PO_FACT.KalenderAnmeldt_Key;
+Load *,
+KalenderAnmeldt_Key as PO_FACT.KalenderAnmeldt_Key
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_LISSAGER\Dim_LISSAGER_KalenderAnmeldt.qvd] (qvd);
+
+PO_OPDATERET:
+Load *
+FROM
+[..\..\..\1_KOS\14_EDW\1403_Datakilder\140305_System\Dim_OMD_POLSAS_Opdateret.qvd] (qvd);
+
+//Grunden til, at vi laver en ny qlikmart, som henter data direkte fra marten sagsbeholdning er (og ikke direkte fra datavarehuset, som tidligere), at der er belvet kodet nogle nye sammenhænge til LCIK sager og IT-økonomisk kriminalitet. Så for
+//at få dem med hentes data direkte fra marten.
+
+Let vStartDato = AddMonths(YearStart(Today()-1),-48);
+Let vSlutDato = Date(today()-1,'DD-MM-YYYY');
+Let vIgaarKey = Date(today()-1,'YYYYMMDD');
+Let vSlutDato365 = Date(addmonths(MonthStart(today()-1),-12)-1,'DD-MM-YYYY');
+
+TableKalender:
+LOAD
+ "PO_KAL.Kalender_Key",
+    "PO_KAL.Kalender_DatoKort" 
+Resident PO_KAL
+Where Match  ( "PO_KAL.Kalender_DatoKort" ,'$(vStartDato)');
+
+Let vDato = Peek('PO_KAL.Kalender_Key');
+
+Drop Table TableKalender;
+
+QUALIFY *;
+//Manual fact
+PO_FACT2:
+UNQUALIFY PO_TYPE.Anmeldelsestype_Key, PO_FACT.KalenderAnmeldt_Key, PO_JOURNAL.JournalNr_Key,PO_TID.AnmTid_Key;
+lOAD JournalNr_Key as PO_JOURNAL.JournalNr_Key,
+Anmeldelsestype_Key as PO_TYPE.Anmeldelsestype_Key,
+AnmTid_Key as PO_TID.AnmTid_Key,
+Kalender_Key as PO_FACT.KalenderAnmeldt_Key
+From [..\..\..\1_KOS\14_EDW\1403_Datakilder\140303_Lissager\Fact_LISSAGER_Anmeldelser.qvd](qvd)
+Where Exists (JournalNr_Key);
+
+Left join (PO_FACT)
+LOAD *
+RESIDENT PO_FACT2;
+drop table PO_FACT2;
+
+//Manual dim
+
+UNQUALIFY *;
+Temp:
+Load *,
+     PO.Organisation_Politikreds & '-' & Organisation_VirksomhedOfficieltNavnKort_LCIK as Organisation_VirksomhedOfficieltNrNavnKort_LCIK;
+LOAD *,
+	 if(PO.Organisation_Politikreds<>11, PO.Organisation_VirksomhedOfficieltNavnKort,
+	    if(Match(PO.Organisation_AfdelingsKode,'DQ','Q1','Q2','Q3','QA','QF','QI','QV'),'LCIK','KBH')) as Organisation_VirksomhedOfficieltNavnKort_LCIK
+Resident PO;
+Drop table PO;
+Rename table Temp to PO;
+
+QUALIFY *;
+
+UNQUALIFY Gerning_Key,PO_GERNING.Gerning_UdvidetPersonfarligKriminalitet,PO_GERNING.Gerning_UdvidetPersonfarligKriminalitetJaNej;
+PO_TEMP:
+lEFT JOIN (PO_GERNING_VERS)
+LOAD Gerning_Key, 
+     PO_GERNING.Gerning_UdvidetPersonfarligKriminalitet ,
+     PO_GERNING.Gerning_UdvidetPersonfarligKriminalitetJaNej 
+Resident PO_GERNING;
+Drop tables PO_GERNING;
+
+UNQUALIFY*;
+PO_BRUGERE:
+load Users_Nickname as Adgangsnavn, 
+     IF (SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1) > 15, '-1', SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1))  as Organisation_Politikreds,
+     Users_Company as Organisation_Forkortelse,
+     Right(Info_ADGruppeInfo_Wrxkode,5) as WrxNr,
+     'Kredsbruger' as AdgangsNiveau
+//from [..\..\..\1_KOS\26_NPrinting\262_MasterApplication\2602_RecipientOutputMaster\recipients_adgroups_danskpoliti.qvd] (qvd)
+from [..\..\..\1_KOS\26_NPrinting\262_MasterApplication\2623_RecipientMasterOutput\Recipients_ADgroups_Danskpoliti.qvd] (qvd)
+where Info_ADGruppeInfo_ADgruppe_Navn = 'Profil_QLVrap_FLA2021_Kredsrapport' and SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1) <= 15;
+
+FOR i = 1 TO 12
+//UNQUALIFY PO_Adgangsnavn, PO_AdgangsNiveau,PO_WrxNr,PO_Organisation_Politikreds;
+Concatenate(PO_BRUGERE)
+PO_LANDSBRUGERE:
+load 
+	Users_Nickname  as Adgangsnavn, 
+	$(i) as Organisation_Politikreds,
+     //IF (SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1) > 15, '-1', SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1))  as DK_Organisation_Politikreds,
+     Users_Company as Organisation_Forkortelse,
+     Right(Info_ADGruppeInfo_Wrxkode,5) as WrxNr,
+     'Landsbruger' as AdgangsNiveau
+//from [..\..\..\1_KOS\26_NPrinting\262_MasterApplication\2602_RecipientOutputMaster\recipients_adgroups_danskpoliti.qvd] (qvd)
+from [..\..\..\1_KOS\26_NPrinting\262_MasterApplication\2623_RecipientMasterOutput\Recipients_ADgroups_Danskpoliti.qvd] (qvd)
+where Info_ADGruppeInfo_ADgruppe_Navn = 'Profil_QLVrap_FLA2021_Kredsrapport' and SubField (Info_ADGruppeInfo_ADgruppe_Profil_Navn_Tilhørende_Organisation ,' -',1) > 15;
+Concatenate (PO_BRUGERE)
+Load * inline  [
+Adgangsnavn, Organisation_Politikreds, Organisation_Forkortelse, WrxNr, AdgangsNiveau
+'Mads Chrøis', $(i), 0,'39723','Landsbruger'
+'Peter Fensholm', 5, 0,'26916','Kredsbruger'
+'Emil Krogsgaard Bjørndal',2,ØJYL,'52739','Kredsbruger'
+'Maja Lykke Larsen',2,ØJYL,'53415','Kredsbruger'
+'Oliver Salby',2,ØJYL,'53438','Kredsbruger'
+'Emma Sophie Thatt Johnston',2,ØJYL,'53436','Kredsbruger'
+];
+
+NEXT i;
+
+Left Join (PO)
+LOAD Organisation_Politikreds as PO.Organisation_Politikreds , 
+     Adgangsnavn as PO.Adgangsnavn, 
+     Organisation_Forkortelse as PO.Organisation_Forkortelse,
+     WrxNr as PO.WrxNr,
+     AdgangsNiveau as PO.AdgangsNiveau
+Resident PO_BRUGERE;
+DROP TABLE PO_BRUGERE;
+
+LOAD *
+Resident PO_KALALM;
+///$tab RA Detaljer
+SET ThousandSep='.';
+SET DecimalSep=',';
+SET MoneyThousandSep='.';
+SET MoneyDecimalSep=',';
+SET MoneyFormat='#.##0,00 kr.;-#.##0,00 kr.';
+SET TimeFormat='hh.mm.ss';
+SET DateFormat='DD/MM/YYYY';
+SET TimestampFormat='DD/MM/YYYY hh.mm.ss[.fff]';
+SET FirstWeekDay=0;
+SET BrokenWeeks=0;
+SET ReferenceDay=4;
+SET FirstMonthOfYear=1;
+SET CollationLocale='da-DK';
+SET MonthNames='jan.;feb.;mar.;apr.;maj;jun.;jul.;aug.;sep.;okt.;nov.;dec.';
+SET LongMonthNames='januar;februar;marts;april;maj;juni;juli;august;september;oktober;november;december';
+SET DayNames='man.;tir.;ons.;tor.;fre.;lør.;søn.';
+SET LongDayNames='mandag;tirsdag;onsdag;torsdag;fredag;lørdag;søndag';
+//********************************SHEET: Main, START*******************************
+/*
+******************** INFORMATION ********************
+CREATED BY               : AFFECTO
+RELEASED IN              : DE.0004 
+
+CHANGELOG: (append from top)
+
+CR.0564 : 04-04-2022 - QV4-PREPROD mod amdwsql02
+CR.0557 : 28-03-2022 - DEV mod amdwsql01
+CR.0398 : 15-06-2020 - Change request
+DE.0004 : 30-11-2016 - Original Release
+
+*****************************************************
+
+CR          : CR.0564
+CR DATE     : 04-04-2022 Sanne Bøjden Johansen, RA
+NOTES       : AM-qv4 PreProd sættes til at læse fra amdwsql02. Kræver at man kører via QMC
+                                                  CPR pilles ud af mailto
+
+CR          : CR.0557
+CR DATE     : 28-03-2022 Sanne Bøjden Johansen, RA
+NOTES       : DEV sættes til at hente fra amdwsql01
+
+CR          : CR.0398
+CR DATE     : 15-06-2020 DCJ/MTH, CGI
+NOTES       : Reolen flyttes fra RP-modellen til SagerOgForhold. 
+                                       Variablene "v_MailtoJourpers" og "v_MailtoSagskompHF" tilrettet til logikken fra SagerOgForhold
+
+*****************************************************
+
+*/
+LET v_Source = 'POL'; //DER SKAL VÆLGES MELLEM 'RA' ELLER 'POL' AFHÆNGIG AF, HVILKET MILJØ, MODELLEN SKAL RELOADES PÅ
+LET v_RP.DB.Source = 'OLEDB CONNECT TO [Provider=SQLOLEDB.1;Integrated Security=SSPI;Persist Security Info=False;Initial Catalog=DM_KOS;Data Source=DAMAMART01PRD,4161;Use Procedure for Prepare=1;Auto Translate=True;Packet Size=4096;Workstation ID=DCA;Use Encryption for Data=False;Tag with column collation when possible=False]';
+/*CR.0342 start*/
+LET s_Environment = subfield(DocumentPath(),'\',-4);
+//LET s_ProductionEnvironment = if(s_Environment='PROD',1,0);   // Used to control log and section access settings, 1=true
+LET s_PreProductionEnvironment = if(s_Environment='PREPROD' or s_Environment='DEV',1,0);            //Used to control connection
+LET v_RA.DB.Source = if(s_PreProductionEnvironment and ComputerName()='AM-QV3','ODBC CONNECT TO AMDWSQL01','ODBC CONNECT TO AMDWSQL02'); //LET v_RA.DB.Source ='ODBC CONNECT TO AMDWSQL02'
+/*CR.0342 end*/
+
+SET v_VIS_RA_SIGTEDE = GetSelectedCount(VIS_RA_SIGTEDE);
+SET v_VIS_RA_GERNINGSKODER = GetSelectedCount(VIS_RA_GERNINGSKODER);
+SET v_VIS_RA_FRISTER = GetSelectedCount(VIS_RA_FRISTER);
+SET v_VIS_RA_SAGSSTATISTIK = GetSelectedCount(VIS_RA_SAGSSTATISTIK);
+SET v_VIS_RA_SAGSBEHANDLER = GetSelectedCount(VIS_RA_SAGSBEHANDLER);
+SET v_VIS_RA_SAGSSTATUS = GetSelectedCount(VIS_RA_SAGSSTATUS);
+SET v_VIS_RA_STRAFFELOV = GetSelectedCount(VIS_RA_STRAFFELOV);
+SET v_VIS_RA_NORMTID_FU_TILT = GetSelectedCount(VIS_RA_NORMTID_FU_TILT);
+SET v_VIS_RA_NORMTID_E_TILT = GetSelectedCount(VIS_RA_NORMTID_E_TILT);
+SET v_MailtoJourpers = '@' & '<url>  mailto:' & BrugerEmail & '&subject=Vedr.: Sagskompleksnummer: ' & SagskompleksNr & ', Journalnummer: ' & JournalNr_lang & ', Sigtet: ' & [Navn (Person)]; //CR.0398
+SET v_MailtoSagskompHF = '@' & '<url>  mailto:' & BrugerEmail & '&subject=Vedr.: Sagskompleksnummer: ' & SagskompleksNr; //CR.0398
+LET v_Soejle.Load ='2';
+SET f_ColorsPriority = If(($1) = 10, RGB(216, 38, 46), If(($1) = 20, RGB(0, 120, 82), If(($1) = 30, RGB(255, 182, 0), RGB(30, 30, 30))));
+SET f_Digits = if($2=1, Num($1, '#.##0,0'), if($2=2, Num($1, '#.##0,00'), Num($1, '#.##0')));
+SET a_Digits0 = '#.##0';
+SET a_Digits1 = '#.##0,0';
+SET a_Digits2 = '#.##0,00';
+LET a_KnapAktiv = 1;
+LET a_FilterVis = 0;
+LET a_SheetReturn = 0;
+SET a_SheetActive = Replace(GetActiveSheetId(),'Document\','');
+LET c_Font.KPI.BoxTitle = RGB(255, 255, 255);
+LET c_KPIbox.Background.BoxTitle = RGB(35, 31, 32);
+LET c_Font.KPI.Value0_1 = RGB(30, 30, 30);
+LET c_Font.KPI.Value1_1 = RGB(255, 182, 0);
+LET c_Font.KPI.Value2_1 = RGB(216, 38, 46);
+LET c_Font.KPI.Value3_1 = RGB(0, 120, 82);
+LET c_Lightbox.Background.SelectArea = RGB(255, 255, 255);
+LET c_Caption.Lightbox.BackgroundMain.Inactive = RGB(92, 102, 111);
+LET c_Font.Lightbox.Title = RGB(255, 255, 255);
+LET c_Caption.Lightbox.BackgroundMain.Active = RGB(92, 102, 111);
+LET c_Caption.Lightbox.BackgroundSub.Inactive = RGB(255, 255, 255);
+LET c_Font.Lightbox.Filter1 = RGB(30, 30, 30);
+LET c_Caption.Lightbox.BackgroundSub.Active = RGB(255, 255, 255);
+LET c_Font.Select.Button.Active = RGB(255, 255, 255);
+LET c_Font.Select.Button.Passive = RGB(30, 30, 30);
+LET c_Chart.Data.01 = RGB(89, 186, 209);
+LET c_Chart.Data.02 = RGB(128, 141, 150);
+LET c_Chart.Data.03 = RGB(147, 53, 100);
+LET c_Chart.Data.04 = RGB(255, 80, 0);
+LET c_Chart.Data.05 = RGB(201, 201, 201);
+LET c_Chart.Font.01 = RGB(30, 30, 30);
+LET c_Chart.Font.02 = RGB(255, 255, 255);
+LET a_KnapAktivOpgaverAktiv = 1; // Variabel slettes i skarp version XXXXX
+LET a_DomainUser = '=upper(subfield(OSUser(),'&chr(39)&'\'&chr(39)&',2))';
+LET a_DefaultKredsnr = '=if(only({1<WRX={'&chr(36)&'(=(a_DomainUser))}>}[Kredsnr (Afd. Hierarki)])'&chr(62)&'= '&chr(39)&'00'&chr(39)&' and only({1<WRX={'&chr(36)&'(=(a_DomainUser))}>}[Kredsnr (Afd. Hierarki)])'&chr(60)&'= '&chr(39)&'12'&chr(39)&',only({1<WRX={'&chr(36)&'(=(a_DomainUser))}>}[Kredsnr (Afd. Hierarki)]),'&chr(39)&'NULL'&chr(39)&')';
+LET a_DefaultKreds = '=only({1<[Kredsnr (Afd. Hierarki)]={'&chr(36)&'(=(a_DefaultKredsnr))}>}[Kreds (Afd. Hierarki)])';
+
+SET f_MonthDateDiffFull=If((Year($1) = Year($2) and Month($1) = Month($2)) or ($1 > $2 and Day($1) >= Day($2)) or ($1 < $2 and Day($1) <= Day($2)), ((Year($1) * 12) + Month($1)) - ((Year($2) * 12) + Month($2)),
+                                                              If($1 > $2 and Day($1) < Day($2), ((Year($1) * 12) + Month($1)) - ((Year($2) * 12) + Month($2)) - 1,
+                                                                           If($1 < $2 and Day($1) > Day($2), ((Year($1) * 12) + Month($1)) - ((Year($2) * 12) + Month($2)) + 1, 'FEJL')));
+SET f_MonthDiff = Num(((Year($2) * 12) + Month($2)) - (((Year($1) * 12) + Month($1))) + 1);
+SET f_MonthDateDiffDecimal = If(Day($2) = Day($1), $(f_MonthDiff($1, $2))-2 + 1-(Day($1) /Day(MonthEnd($1) + (1/86400))) + (Day($2) /Day(MonthEnd($2) + (1/86400))), $(f_MonthDiff($1, $2))-2 + 1-(Day($1) /Day(MonthEnd($1))) + (Day($2) /Day(MonthEnd($2))));
+LET v_DaysDiffTodayPS = Num(Today()) - Num(v_PS.DWHDATO);
+//SET v_DaysDiffTodayPS = Num(Today()) - Num(v_PS.DWHDATO);
+//LET v_DaysDiffTodayPS = Num(Today()) - Num('$(v_PS.DWHDATO)');
+
+
+
+
+/*#CR.0223.s */
+//Directory;             // Global setting of relational paths
+
+/*
+******************** INFORMATION ********************
+CREATED BY               : CGI
+RELEASED IN              : DE.0020
+
+CHANGELOG:
+
+CR.0XXX : 25-01-2019 - Light framework version
+
+*****************************************************
+
+CR          : CR.0XXX
+CR DATE     : DD-MM-YYYY Aaaaaa Bbbbbbb, CGI
+NOTES       : Ipsum
+
+*****************************************************
+*/
+
+SUB QV.Trace(i_PreBreak, i_Message, i_PostBreak)
+
+                         IF $(i_PreBreak) THEN 
+                                     TRACE ; 
+                         ENDIF
+                         
+                         TRACE $(i_Message);
+                         
+                         IF $(i_PostBreak) THEN 
+                                     TRACE ; 
+                         ENDIF
+
+ENDSUB
+
+SUB QV.QVDConcatenate(i_TableName,i_FileName,i_DeltaKey)
+
+            if not upper(right(i_FileName,4)) = '.QVD' THEN
+                         LET i_FileName = '$(i_FileName).QVD';
+            endif
+
+            LET t_MemoryRows = NoOfRows('$(i_TableName)');
+            LET t_FileExist=if(FileTime('$(i_FileName)')>0,-1,0);
+
+            if $(t_FileExist) then
+                         Concatenate($(i_TableName))
+                         load *
+                         FROM
+                         $(i_FileName)
+                         (qvd)
+                         where not Exists($(i_DeltaKey));
+            endif
+            
+            LET t_MemoryRows=;
+            LET t_FileExist=;
+            
+ENDSUB
+
+SUB QV.QVDStore(i_TableName,i_FileName)
+
+            if not upper(right(i_FileName,4)) = '.QVD' THEN
+                         LET i_FileName = '$(i_FileName).QVD';
+            endif
+
+            LET t_QVDBeforeStore = QvdNoOfRecords ('$(i_FileName)')+0;
+
+            if isnull(t_QVDBeforeStore) THEN
+                         let t_QVDBeforeStore = 0;
+            endif
+            
+            STORE [$(i_TableName)] INTO $(i_FileName);
+            LET t_QVDAfterStore = QvdNoOfRecords ('$(i_FileName)');
+
+            Call Qv.Trace(0,'# Table $(i_TableName) Stored into $(i_FileName) before/after: $(t_QVDBeforeStore)/$(t_QVDAfterStore)',0);
+            
+            LET t_QVDBeforeStore=;
+            LET t_QVDAfterStore=;
+            
+ENDSUB
+
+SUB QV.QVDConcatenateStore(i_TableName,i_FileName,i_DeltaKey)
+
+            call QV.QVDConcatenate(i_TableName,i_FileName,i_DeltaKey);
+            call QV.QVDStore(i_TableName,i_FileName);
+            
+ENDSUB
+
+SUB QV.QVDPartition(i_TableName,i_FileName,i_DeltaKey,i_PartitionBy) 
+
+            LOOP_PARTITIONS:
+            NoConcatenate
+            load distinct [$(i_PartitionBy)]
+            Resident $(i_TableName)
+            order by [$(i_PartitionBy)]
+            ;
+
+            for i = 0 to NoOfRows('LOOP_PARTITIONS')-1
+
+                         LET l_Partition = Peek('$(i_PartitionBy)',i,'LOOP_PARTITIONS');
+                         Call QV.Trace(1,'**     Partition by $(l_Partition)     **',0);
+
+                         if not isnull(l_Partition) then
+                                     NoConcatenate
+                                     [DATALOAD_$(l_Partition)]:
+                                     load *
+                                     Resident $(i_TableName)
+                                     where [$(i_PartitionBy)] = '$(l_Partition)'
+                                     ; 
+
+                                     LET t_MemoryRows = NoOfRows('DATALOAD_$(l_Partition)');
+                                     LET t_TargetFileExist=if(FileTime('$(i_QVDDirectoryName)\$(i_FileName)_$(l_Partition).QVD')>0,1,0);
+
+                                     IF t_MemoryRows > 0 and t_TargetFileExist then
+                                                  CALL QV.QVDConcatenate('DATALOAD_$(l_Partition)','$(i_FileName)_$(l_Partition)',i_DeltaKeyName);
+                                     ENDIF
+                                     
+                                     LET t_MemoryRows=;
+                                     LET t_TargetFileExist=;
+                                     
+                                     Call QV.QVDStore('DATALOAD_$(l_Partition)','$(i_FileName)_$(l_Partition)');
+
+                                     Drop Table [DATALOAD_$(l_Partition)];
+
+                         endif
+            next
+            
+            LET l_Partition=;
+            Drop Table LOOP_PARTITIONS;
+
+ENDSUB
+
+SUB QV.ChangeLog(i_LogEntry) 
+
+            LET s_LastChangeLog = mid(  
+                                                                           // Text from application log that starts with 'CHANGELOG'
+                                                                           mid(i_LogEntry,index(i_LogEntry,'CHANGELOG'),index(i_LogEntry,'********************************')-index(i_LogEntry,'CHANGELOG')),
+                                                                           // teskt starter efter først 2 linieskift ~ CHR(10)
+                                                                                       index(
+                                                                                       mid(i_LogEntry,index(i_LogEntry,'CHANGELOG'),index(i_LogEntry,'********************************')-index(i_LogEntry,'CHANGELOG')),
+                                                                                                   chr(10),2
+                                                                                                   ) +1
+                                                                                       , 
+                                                                           // length of texts
+                                                                                       index(
+                                                                                       mid(i_LogEntry,index(i_LogEntry,'CHANGELOG'),index(i_LogEntry,'********************************')-index(i_LogEntry,'CHANGELOG')),
+                                                                                                   chr(10),3) 
+                                                                                       - index(
+                                                                                       mid(i_LogEntry,index(i_LogEntry,'CHANGELOG'),index(i_LogEntry,'********************************')-index(i_LogEntry,'CHANGELOG')),
+                                                                                                   chr(10),2)               
+                                                                           );
+
+            Let s_LastChangeNumber = left(s_LastChangeLog,7);
+            Let s_LastChangeDate = trim(subfield(subfield(s_LastChangeLog, ':',2),' - ',1));
+
+ENDSUB
+
+/*
+
+// Let t_LogFileExist=if(FileTime('$(t_LogFileName)')>0,-1,0);
+
+            // if $(t_LogFileExist) then
+
+
+
+// IF ScriptErrorCount = 0 then
+            // LET t_MemoryRows = NoOfRows('$(s_StoreMemoryTable)');
+            // IF s_EnableDelta and s_ConcatenateStorage and t_MemoryRows > 0 and s_TargetRowsBeforeLoad > 0 then
+                         // CALL QV.QVDConcatenate('$(s_StoreMemoryTable)','$(s_Target)','$(s_DeltaKeyName)');
+            // endif
+            // LET t_MemoryRows=;
+// ELSE
+            // Call Qv.Trace(0,'$(ScriptErrorList)',0);
+// EndIf
+
+
+*/
+
+
+Let v_OrgKredsList = '1,7,9,12,19,22,23,33,37,41,42,51';
+
+// SET ThousandSep='.';
+// SET DecimalSep=',';
+// SET MoneyThousandSep='.';
+// SET MoneyDecimalSep=',';
+// SET MoneyFormat='kr. #.##0,00;kr. -#.##0,00';
+// SET TimeFormat='hh:mm:ss';
+// SET DateFormat='DD-MM-YYYY';
+// SET TimestampFormat='DD-MM-YYYY hh:mm:ss[.fff]';
+// SET MonthNames='jan;feb;mar;apr;maj;jun;jul;aug;sep;okt;nov;dec';
+// SET DayNames='ma;ti;on;to;fr;lø;sø';
+
+SET ThousandSep='.';
+SET DecimalSep=',';
+SET MoneyThousandSep='.';
+SET MoneyDecimalSep=',';
+SET MoneyFormat='kr. #.##0,00;kr. -#.##0,00';
+SET TimeFormat='hh:mm:ss';
+SET DateFormat='DD-MM-YYYY';
+SET TimestampFormat='DD-MM-YYYY hh:mm:ss[.fff]';
+SET MonthNames='Jan;Feb;Mar;Apr;Maj;Jun;Jul;Aug;Sep;Okt;Nov;Dec';
+SET DayNames='Ma;Ti;On;To;Fr;Lø;Sø';
+SET LongDayNames='Mandag;Tirsdag;Onsdag;Torsdag;Fredag;Lørdag;Søndag';
+
+call QV.ChangeLog(s_LogEntry);
+
+/*#CR.0223.e */
+
+
+
+Hideprefix='_' ;
+
+/*
+******************** DESCRIPTION ********************
+
+SYNTAX      : Call QV.Calendar(_startDate, _endDate, _tableName, _fieldPrefix, _lang, _type, _key)
+                                                  _startDate               : First date to be included in the generated Calendar
+                                                  _endDate                 : Last date to be included in the generated Calendar
+                                                  _tableName               : Name of the generated Calendar Table
+                                                  _FieldPrefix : Prefix to be used on all Fields
+                                                  _lang                                : Language ('DK' for Danish otherwise English)
+                                                  _type                                : Type of Calendar ('SMALL'|'MEDIUM'|'FULL'|'UNI')
+                                                  _key                                 : Field name to be used as key towards the rest of the datamodel - It's the date field that will be used as key.
+
+*****************************************************
+
+*/
+//call QV.IncludeScan('..\80_SCRIPTS\80_CALENDAR.qvs');
+
+SUB QV.Calendar(_startDate, _endDate, _tableName, _fieldPrefix, _lang, _type, _key, _indexdate)
+       call QV.Trace(1,'Creating Calendar - $(_tableName)',0) ;
+       call QV.Trace(0,'Start date - $(_startDate)',0) ;      
+       call QV.Trace(0,'End date   - $(_endDate)',0) ; 
+       
+       if len('$(_indexdate)') < 1 then
+            let _indexdate=today();
+       ENDIF
+
+       call QV.Trace(0,'Index base date   - $(_indexdate)',0) ; 
+       
+       [$(_tableName) TEMP]:
+       LOAD
+                                     Aff_QV_Date                                                                                                                 AS [$(_key)],
+                    Aff_QV_Date                                                                                                        AS [$(_fieldPrefix)Date],
+                                Year(Aff_QV_Date)                                                                                                   AS [$(_fieldPrefix)Year],
+                                if(NUM(MONTH(Aff_QV_Date)) < 7,
+                                    1,
+                                    2)                                                                                                                          AS [$(_fieldPrefix)Half-Year],
+                                                  Dual(Month(Aff_QV_Date),
+                                                      num(Month(Aff_QV_Date),00))                                                       AS [$(_fieldPrefix)Month],
+                                                  num(Week(Aff_QV_Date),00)                                                                          AS [$(_fieldPrefix)Week],
+                                                  Day(Aff_QV_Date)                                                                                               AS [$(_fieldPrefix)Day],
+                                                  WeekDay(Aff_QV_Date)                                                                               AS [$(_fieldPrefix)WeekDayNO],
+                                                  TEXT(Date(Aff_QV_Date,'WWW'))                                                         AS [$(_fieldPrefix)WeekDayShort],
+                                                  TEXT(Date(Aff_QV_Date,'WWWW'))                                                        AS [$(_fieldPrefix)WeekDayLong],
+                                                  Year(Aff_QV_Date)&num(Month(Aff_QV_Date),00)             AS [$(_fieldPrefix)YYYYMM],
+                                                  Num(Ceil(Num(Month(Aff_QV_Date))/3))                         AS [$(_fieldPrefix)Quarter],
+                                                  /*Dual('Q'&Num(Ceil(Num(Month(Aff_QV_Date))/3)),
+                                                     Num(Ceil(NUM(Month(Aff_QV_Date))/3),00))             AS [$(_fieldPrefix)Quarter],*/
+                                                  NUM(Aff_QV_Date - '$(_indexdate)')                                                                 AS [$(_fieldPrefix)Index(Day)],
+                                                  ((Year(Aff_QV_Date)*12)+Month(Aff_QV_Date)) - 
+                                                     (((Year('$(_indexdate)')*12)+Month('$(_indexdate)')))                    AS [$(_fieldPrefix)Index(Month)],
+                                                  ((Year(Aff_QV_Date)*4)+
+                                                     Num(Ceil(NUM(Month(Aff_QV_Date))/3),00)) - 
+                                                     (((Year('$(_indexdate)')*4)+
+                                                     Num(Ceil(NUM(Month('$(_indexdate)'))/3),00)))             AS [$(_fieldPrefix)Index(Quarter)],
+                                                  NUM(Year(Aff_QV_Date) - Year('$(_indexdate)'))                           AS [$(_fieldPrefix)Index(Year)],
+                                                  if(Year2Date(Aff_QV_Date, 
+                                                                                       NUM(Year(Aff_QV_Date) - Year('$(_indexdate)')),
+                                                                                       1,'$(_indexdate)'), 1,0)             as [$(_fieldPrefix)YTD_FLAG],
+                                                  if(day(Aff_QV_Date) <= day('$(_indexdate)'), 1,0) as [$(_fieldPrefix)MTD_FLAG],
+                                                  NetWorkDays(Aff_QV_Date, Aff_QV_Date)                                     AS [$(_fieldPrefix)Workday],
+                                                  (DayNumberOfYear(Aff_QV_Date)/
+                                                     DayNumberOfYear(YearEnd(Aff_QV_Date)))                   AS [$(_fieldPrefix)PCT of Year (full)],
+                                     (DayNumberOfQuarter(Aff_QV_Date)/
+                                        DayNumberOfQuarter(QuarterEnd(Aff_QV_Date))) AS [$(_fieldPrefix)PCT of Quarter (full)],
+                                     (Day(Aff_QV_Date)/Day(MonthEnd(Aff_QV_Date)))   AS [$(_fieldPrefix)PCT of Month (full)],
+                                     (WeekDay(Aff_QV_Date)+1)/7                                                                        AS [$(_fieldPrefix)PCT of Week (full)],
+                                     networkdays(YearStart(Aff_QV_Date), Aff_QV_Date) / 
+                                        networkdays(YearStart(Aff_QV_Date), 
+                                           YearEnd(Aff_QV_Date))                                                           AS [$(_fieldPrefix)PCT of Year (workdays)],
+                                     networkdays(QuarterStart(Aff_QV_Date), Aff_QV_Date) / 
+                                        networkdays(QuarterStart(Aff_QV_Date), 
+                                           QuarterEnd(Aff_QV_Date))                                                        AS [$(_fieldPrefix)PCT of Quarter (workdays)],
+                                     networkdays(MonthStart(Aff_QV_Date), Aff_QV_Date) / 
+                                        networkdays(MonthStart(Aff_QV_Date), 
+                                           MonthEnd(Aff_QV_Date))                                                          AS [$(_fieldPrefix)PCT of Month (workdays)],
+                                     networkdays(WeekStart(Aff_QV_Date), Aff_QV_Date) / 
+                                        networkdays(WeekStart(Aff_QV_Date), 
+                                           WeekEnd(Aff_QV_Date))                                                           AS [$(_fieldPrefix)PCT of Week (workdays)],
+                                                  trim(if(Date(Aff_QV_Date,'DD-MM')='29-12',Text(Date(Aff_QV_Date,'13-YY')),
+                                                              if(Date(Aff_QV_Date,'DD-MM')='30-12',Text(Date(Aff_QV_Date,'14-YY')),
+                                                                           if(Date(Aff_QV_Date,'DD-MM')='31-12',Text(Date(Aff_QV_Date,'15-YY')),        
+                                                                                       Text(Date(Aff_QV_Date,'MM-YY')))))) as [$(_fieldPrefix)Finance Period],                                       
+                                          trim(if(Date(Aff_QV_Date,'DD-MM')='29-12',Text(Date(Aff_QV_Date,'YYYY-13')),
+                                                 if(Date(Aff_QV_Date,'DD-MM')='30-12',Text(Date(Aff_QV_Date,'YYYY-14')),
+                                                              if(Date(Aff_QV_Date,'DD-MM')='31-12',Text(Date(Aff_QV_Date,'YYYY-15')),        
+                                                                          Text(Date(Aff_QV_Date,'YYYY-MM')))))) as [$(_fieldPrefix)Finance Period ÅÅÅÅ-PP],
+                                          trim(if(Date(Aff_QV_Date,'DD-MM')='29-12',Text(Date(Aff_QV_Date,'YYYY13')),
+                                                 if(Date(Aff_QV_Date,'DD-MM')='30-12',Text(Date(Aff_QV_Date,'YYYY14')),
+                                                              if(Date(Aff_QV_Date,'DD-MM')='31-12',Text(Date(Aff_QV_Date,'YYYY15')),        
+                                                                          Text(Date(Aff_QV_Date,'YYYYMM')))))) as [$(_fieldPrefix)Finance Period ÅÅÅÅPP],
+                                          if( num(Month(Aff_QV_Date),00) < 7, dual(Year(Aff_QV_Date) &' F',Year(Aff_QV_Date)&'1') , dual(Year(Aff_QV_Date) &' E',Year(Aff_QV_Date) &'2') ) as [$(_fieldPrefix)Semester of Acceptance]                                                                                                                                                            
+       ;    
+       LOAD date('$(_startDate)' + recno() - 1) as Aff_QV_Date 
+       AUTOGENERATE date('$(_endDate)') - date('$(_startDate)') + 1
+       ;
+
+
+            if upper(_type) = 'SMALL' then
+                 if upper(_lang)='DK' then
+                        [$(_tableName)]:
+                                NoConcatenate          
+                                LOAD DISTINCT    [$(_key)],
+                                                                                       [$(_fieldPrefix)Date] as [$(_fieldPrefix)Dato] ,
+                                                                      [$(_fieldPrefix)Year] as [$(_fieldPrefix)År],
+                                                                      Dual([$(_fieldPrefix)Half-Year]&'. halvår',[$(_fieldPrefix)Half-Year]) as [$(_fieldPrefix)Halvår],
+                                                                                                   [$(_fieldPrefix)Month] as [$(_fieldPrefix)Måned],
+                                                                                                   [$(_fieldPrefix)Week] as [$(_fieldPrefix)Uge],
+                                                                                                   [$(_fieldPrefix)Day] as [$(_fieldPrefix)Dag]
+                                        RESIDENT  [$(_tableName) TEMP] ;
+                         else 
+                                     [$(_tableName)]:
+                                NoConcatenate          
+                                LOAD DISTINCT    [$(_key)],
+                                                                                       [$(_fieldPrefix)Date],
+                                                                      [$(_fieldPrefix)Year],
+                                                                      Dual([$(_fieldPrefix)Half-Year]&'. half', [$(_fieldPrefix)Half-Year]) as [$(_fieldPrefix)Half-Year],
+                                                                                                   [$(_fieldPrefix)Month],
+                                                                                                   [$(_fieldPrefix)Week],
+                                                                                                   [$(_fieldPrefix)Day]
+                                        RESIDENT  [$(_tableName) TEMP] ; 
+                         end if      
+            end if
+            
+            if upper(_type) = 'MEDIUM' then
+                         if upper(_lang)='DK' then
+                              [$(_tableName)]:
+                                NoConcatenate 
+                                LOAD DISTINCT    [$(_key)],
+                                                                                       [$(_fieldPrefix)Date] as [$(_fieldPrefix)Dato],
+                                                                      [$(_fieldPrefix)Year] as [$(_fieldPrefix)År],
+                                                                      Dual([$(_fieldPrefix)Half-Year]&'. halvår',[$(_fieldPrefix)Half-Year]) as [$(_fieldPrefix)Halvår],
+                                                                                                   [$(_fieldPrefix)Month] as [$(_fieldPrefix)Måned],
+                                                                                                   [$(_fieldPrefix)Week] as [$(_fieldPrefix)Uge],
+                                                                                                   [$(_fieldPrefix)Day] as [$(_fieldPrefix)Dag],
+                                                                                                   [$(_fieldPrefix)WeekDayNO] as [$(_fieldPrefix)Ugedag nr],
+                                                                                                   [$(_fieldPrefix)WeekDayShort] as [$(_fieldPrefix)Ugedag kort],
+                                                                                                  [$(_fieldPrefix)WeekDayLong] as [$(_fieldPrefix)Ugedag lang],
+                                                                                                   [$(_fieldPrefix)YYYYMM] as [$(_fieldPrefix)ÅÅÅÅMM],
+                                                                                                   Dual([$(_fieldPrefix)Quarter]&'. kvt',
+                                                                                                               [$(_fieldPrefix)Quarter])            AS [$(_fieldPrefix)Kvartal],
+//                                                                                                 [$(_fieldPrefix)Quarter] as [$(_fieldPrefix)Kvartal],
+                                                                                                   [$(_fieldPrefix)Workday] as [$(_fieldPrefix)Arbejdsdag],
+                                                                                                   [$(_fieldPrefix)YTD_FLAG],
+                                                                                                   [$(_fieldPrefix)MTD_FLAG]
+                                        RESIDENT  [$(_tableName) TEMP] ;
+                         else 
+                              [$(_tableName)]:
+                                NoConcatenate 
+                                LOAD DISTINCT    [$(_key)],
+                                                                                       [$(_fieldPrefix)Date],
+                                                                      [$(_fieldPrefix)Year],
+                                                                      Dual([$(_fieldPrefix)Half-Year]&'. half', [$(_fieldPrefix)Half-Year]) as [$(_fieldPrefix)Half-Year],
+                                                                                                   [$(_fieldPrefix)Month],
+                                                                                                   [$(_fieldPrefix)Week],
+                                                                                                   [$(_fieldPrefix)Day],
+                                                                                                   [$(_fieldPrefix)WeekDayNO],
+                                                                                                   [$(_fieldPrefix)WeekDayShort],
+                                                                                                  [$(_fieldPrefix)WeekDayLong],
+                                                                                                   [$(_fieldPrefix)YYYYMM],
+                                                                                                   Dual('Q'&[$(_fieldPrefix)Quarter],
+                                                                                                               [$(_fieldPrefix)Quarter])            AS          [$(_fieldPrefix)Quarter],
+                                                                                                   [$(_fieldPrefix)Workday],
+                                                                                                   [$(_fieldPrefix)YTD_FLAG],
+                                                                                                   [$(_fieldPrefix)MTD_FLAG]
+                                        RESIDENT  [$(_tableName) TEMP] ;
+                         end if
+            end if
+
+            if upper(_type) = 'FULL' then
+                         if upper(_lang)='DK' then
+                              [$(_tableName)]:
+                                NoConcatenate 
+                                LOAD DISTINCT    [$(_key)],
+                                                                                       [$(_fieldPrefix)Date] as [$(_fieldPrefix)Dato],
+                                                                      [$(_fieldPrefix)Year] as [$(_fieldPrefix)År],
+                                                                      Dual([$(_fieldPrefix)Half-Year]&'. halvår',[$(_fieldPrefix)Half-Year]) as [$(_fieldPrefix)Halvår],
+                                                                                                   [$(_fieldPrefix)Month] as [$(_fieldPrefix)Måned],
+                                                                                                   [$(_fieldPrefix)Week] as [$(_fieldPrefix)Uge],
+                                                                                                   [$(_fieldPrefix)Day] as [$(_fieldPrefix)Dag],
+                                                                                                   [$(_fieldPrefix)WeekDayNO] as [$(_fieldPrefix)Ugedag nr],
+                                                                                                   [$(_fieldPrefix)WeekDayShort] as [$(_fieldPrefix)Ugedag kort],
+                                                                                                  [$(_fieldPrefix)WeekDayLong] as [$(_fieldPrefix)Ugedag lang],
+                                                                                                   [$(_fieldPrefix)YYYYMM] as [$(_fieldPrefix)ÅÅÅÅMM],
+                                                                                                   Dual([$(_fieldPrefix)Quarter]&'. kvt',
+                                                                                                               [$(_fieldPrefix)Quarter])            AS [$(_fieldPrefix)Kvartal],
+                                                                                                   [$(_fieldPrefix)Index(Day)] as [$(_fieldPrefix)Index(Dag)],
+                                                                                                   [$(_fieldPrefix)Index(Month)] as [$(_fieldPrefix)Index(Måned)],
+                                                                                                   [$(_fieldPrefix)Index(Quarter)] as [$(_fieldPrefix)Index(Kvartal)],
+                                                                                                   [$(_fieldPrefix)Index(Year)] as [$(_fieldPrefix)Index(År)],
+                                                                                                   [$(_fieldPrefix)YTD_FLAG],
+                                                                                                   [$(_fieldPrefix)MTD_FLAG], 
+                                                                                                   [$(_fieldPrefix)Workday] as [$(_fieldPrefix)Arbejdsdag],
+                                                                                                   [$(_fieldPrefix)PCT of Year (full)] as [$(_fieldPrefix)PCT af År (fuld)],
+                                                                                                   [$(_fieldPrefix)PCT of Quarter (full)] as [$(_fieldPrefix)PCT af Kvartal (fuld)],
+                                                                                                   [$(_fieldPrefix)PCT of Month (full)] as [$(_fieldPrefix)PCT af Måned (fuld)],
+                                                                                                   [$(_fieldPrefix)PCT of Week (full)] as [$(_fieldPrefix)PCT af Uge (fuld)],
+                                                                                                   [$(_fieldPrefix)PCT of Year (workdays)] as [$(_fieldPrefix)PCT af År (arbejdsdage)],
+                                                                                                   [$(_fieldPrefix)PCT of Quarter (workdays)] as [$(_fieldPrefix)PCT af kvartal (arbejdsdage)],
+                                                                                                   [$(_fieldPrefix)PCT of Month (workdays)] as [$(_fieldPrefix)PCT af Måned (arbejdsdage)],
+                                                                                                   [$(_fieldPrefix)PCT of Week (workdays)] as [$(_fieldPrefix)PCT af Uge (arbejdsdage)],
+                                                                                                   [$(_fieldPrefix)Semester of Acceptance] as [$(_fieldPrefix)Optag Semester],
+                                                                                                   if([$(_fieldPrefix)Semester of Acceptance] - if( num(Month(today()),00) < 7, Year(today())&'1' , Year(today()) &'2')  >= 0,
+                                                                                                                            DIV([$(_fieldPrefix)Semester of Acceptance]- if( num(Month(today()),00) < 7, Year(today())&'1' , Year(today()) &'2'),5)
+                                                                                                                            ,DIV([$(_fieldPrefix)Semester of Acceptance]- if( num(Month(today()),00) < 7, Year(today())&'1' , Year(today()) &'2')-4,5)) as [$(_fieldPrefix)Index(Optag Semester)]                                                                                                                      
+                                        RESIDENT  [$(_tableName) TEMP] ;
+                                        
+                                        LET cal_$(_fieldPrefix)Selected_YearIndex  = 'if(GetPossibleCount([$(_fieldPrefix)Index(År)])=1,only([$(_fieldPrefix)Index(År)]+if(isnull($1),0,$1)),only({<[$(_fieldPrefix)År] = {' & chr(36) & '(=year('&chr(39)&'$(_indexdate)'&chr(39)&'))}>}[$(_fieldPrefix)Index(År)]+if(isnull($1),0,$1)))' ; 
+                                        LET cal_$(_fieldPrefix)Selected_Year       = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(År)] = {"' & chr(36) & '(=' & chr(36) & '(cal_$(_fieldPrefix)Selected_YearIndex($1)))"}>} [$(_fieldPrefix)År])';
+                                        LET cal_$(_fieldPrefix)Selected_MonthIndex = 'if(GetPossibleCount([$(_fieldPrefix)Index(Måned)])=1,only([$(_fieldPrefix)Index(Måned)]), if(GetPossibleCount([$(_fieldPrefix)Index(År)])=1,only({<[$(_fieldPrefix)Måned] = {' & chr(36) & '(=if(GetPossibleCount([$(_fieldPrefix)Måned])=1,only([$(_fieldPrefix)Måned]),month('&chr(39)&'$(_indexdate)'&chr(39)&')))}>}[$(_fieldPrefix)Index(Måned)]+if(isnull($1),0,$1)),only({<[$(_fieldPrefix)År] = {' & chr(36) & '(=year('&chr(39)&'$(_indexdate)'&chr(39)&'))},[$(_fieldPrefix)Måned] = {' & chr(36) & '(=if(GetPossibleCount([$(_fieldPrefix)Måned])=1,only([$(_fieldPrefix)Måned]),month('&chr(39)&'$(_indexdate)'&chr(39)&')))}>}[$(_fieldPrefix)Index(Måned)]+if(isnull($1),0,$1))))';
+                                        LET cal_$(_fieldPrefix)Selected_Month      = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(Måned)] = {"' & chr(36) & '(=' & chr(36) & '(cal_$(_fieldPrefix)Selected_MonthIndex($1)))"}>} [$(_fieldPrefix)År] ' & chr(38) & chr(39) & '-' & chr(39) & chr(38) & ' [$(_fieldPrefix)Måned])'; 
+                                        LET cal_$(_fieldPrefix)Current_Year                         = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(År)] = {"0"}>} [$(_fieldPrefix)År] + if(isnull($1),0,$1))';     
+                                        LET cal_$(_fieldPrefix)Current_Month                        = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(Måned)] = {"' & chr(36) & '(=if(isnull($1),0,$1))'&'"}>} [$(_fieldPrefix)År] ' & chr(38) & chr(39) & '-' & chr(39) & chr(38) & ' [$(_fieldPrefix)Måned])';
+                         else 
+                              [$(_tableName)]:
+                                NoConcatenate 
+                                LOAD DISTINCT    [$(_key)],
+                                                                                       [$(_fieldPrefix)Date],
+                                                                      [$(_fieldPrefix)Year],
+                                                                      Dual([$(_fieldPrefix)Half-Year]&'. half', [$(_fieldPrefix)Half-Year]) as [$(_fieldPrefix)Half-Year],
+                                                                                                   [$(_fieldPrefix)Month],
+                                                                                                   [$(_fieldPrefix)Week],
+                                                                                                   [$(_fieldPrefix)Day],
+                                                                                                   [$(_fieldPrefix)WeekDayNO],
+                                                                                                   [$(_fieldPrefix)WeekDayShort],
+                                                                                                  [$(_fieldPrefix)WeekDayLong],
+                                                                                                   [$(_fieldPrefix)YYYYMM],
+                                                                                                   Dual('Q'&[$(_fieldPrefix)Quarter],
+                                                                                                               [$(_fieldPrefix)Quarter])            AS          [$(_fieldPrefix)Quarter],
+                                                                                                   [$(_fieldPrefix)Index(Day)],
+                                                                                                   [$(_fieldPrefix)Index(Month)],
+                                                                                                   [$(_fieldPrefix)Index(Quarter)],
+                                                                                                   [$(_fieldPrefix)Index(Year)],
+                                                                                                   [$(_fieldPrefix)YTD_FLAG],
+                                                                                                   [$(_fieldPrefix)MTD_FLAG],
+                                                                                                   [$(_fieldPrefix)Workday],
+                                                                                                   [$(_fieldPrefix)PCT of Year (full)],
+                                                                                                   [$(_fieldPrefix)PCT of Quarter (full)],
+                                                                                                   [$(_fieldPrefix)PCT of Month (full)],
+                                                                                                   [$(_fieldPrefix)PCT of Week (full)],
+                                                                                                   [$(_fieldPrefix)PCT of Year (workdays)],
+                                                                                                   [$(_fieldPrefix)PCT of Quarter (workdays)],
+                                                                                                   [$(_fieldPrefix)PCT of Month (workdays)],
+                                                                                                   [$(_fieldPrefix)PCT of Week (workdays)],
+                                                                                                   [$(_fieldPrefix)Semester of Acceptance],
+                                                                                                   if([$(_fieldPrefix)Semester of Acceptance] - if( num(Month(today()),00) < 7, Year(today())&'1' , Year(today()) &'2')  >= 0,
+                                                                                                                            DIV([$(_fieldPrefix)Semester of Acceptance]- if( num(Month(today()),00) < 7, Year(today())&'1' , Year(today()) &'2'),5)
+                                                                                                                           ,DIV([$(_fieldPrefix)Semester of Acceptance]- if( num(Month(today()),00) < 7, Year(today())&'1' , Year(today()) &'2')-4,5)) as [$(_fieldPrefix)Index(Semester of Acceptance)]                                                                                                                            
+                                        RESIDENT  [$(_tableName) TEMP] ;
+                                        
+                                        LET cal_$(_fieldPrefix)Selected_YearIndex  = 'if(GetPossibleCount([$(_fieldPrefix)Index(År)])=1,only([$(_fieldPrefix)Index(År)]+if(isnull($1),0,$1)),only({<[$(_fieldPrefix)År] = {' & chr(36) & '(=year('&chr(39)&'$(_indexdate)'&chr(39)&'))}>}[$(_fieldPrefix)Index(År)]+if(isnull($1),0,$1)))' ; 
+                                        LET cal_$(_fieldPrefix)Selected_Year       = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(År)] = {"' & chr(36) & '(=' & chr(36) & '(cal_$(_fieldPrefix)Selected_YearIndex($1)))"}>} [$(_fieldPrefix)År])';
+                                        LET cal_$(_fieldPrefix)Selected_MonthIndex = 'if(GetPossibleCount([$(_fieldPrefix)Index(Måned)])=1,only([$(_fieldPrefix)Index(Måned)]), if(GetPossibleCount([$(_fieldPrefix)Index(År)])=1,only({<[$(_fieldPrefix)Måned] = {' & chr(36) & '(=if(GetPossibleCount([$(_fieldPrefix)Måned])=1,only([$(_fieldPrefix)Måned]),month('&chr(39)&'$(_indexdate)'&chr(39)&')))}>}[$(_fieldPrefix)Index(Måned)]+if(isnull($1),0,$1)),only({<[$(_fieldPrefix)År] = {' & chr(36) & '(=year('&chr(39)&'$(_indexdate)'&chr(39)&'))},[$(_fieldPrefix)Måned] = {' & chr(36) & '(=if(GetPossibleCount([$(_fieldPrefix)Måned])=1,only([$(_fieldPrefix)Måned]),month('&chr(39)&'$(_indexdate)'&chr(39)&')))}>}[$(_fieldPrefix)Index(Måned)]+if(isnull($1),0,$1))))';
+                                        LET cal_$(_fieldPrefix)Selected_Month      = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(Måned)] = {"' & chr(36) & '(=' & chr(36) & '(cal_$(_fieldPrefix)Selected_MonthIndex($1)))"}>} [$(_fieldPrefix)År] ' & chr(38) & chr(39) & '-' & chr(39) & chr(38) & ' [$(_fieldPrefix)Måned])'; 
+                                        LET cal_$(_fieldPrefix)Current_Year                         = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(År)] = {"0"}>} [$(_fieldPrefix)År] + if(isnull($1),0,$1))';     
+                                        LET cal_$(_fieldPrefix)Current_Month                        = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(Måned)] = {"' & chr(36) & '(=if(isnull($1),0,$1))'&'"}>} [$(_fieldPrefix)År] ' & chr(38) & chr(39) & '-' & chr(39) & chr(38) & ' [$(_fieldPrefix)Måned])';
+                         end if                  
+            end if
+
+            if upper(_type) = 'UNI' then
+                         if upper(_lang)='DK' then
+                              [$(_tableName)]:
+                                NoConcatenate 
+                                LOAD DISTINCT    [$(_key)],
+                                                                                       [$(_fieldPrefix)Date] as [$(_fieldPrefix)Dato],
+                                                                      [$(_fieldPrefix)Year] as [$(_fieldPrefix)År],
+                                                                      Dual([$(_fieldPrefix)Half-Year]&'. halvår',[$(_fieldPrefix)Half-Year]) as [$(_fieldPrefix)Halvår],
+                                                                                                   [$(_fieldPrefix)Month] as [$(_fieldPrefix)Måned],
+                                                                                                   [$(_fieldPrefix)Week] as [$(_fieldPrefix)Uge],
+                                                                                                   [$(_fieldPrefix)Day] as [$(_fieldPrefix)Dag],
+                                                                                                   [$(_fieldPrefix)WeekDayNO] as [$(_fieldPrefix)Ugedag nr],
+                                                                                                   [$(_fieldPrefix)WeekDayShort] as [$(_fieldPrefix)Ugedag kort],
+                                                                                                  [$(_fieldPrefix)WeekDayLong] as [$(_fieldPrefix)Ugedag lang],
+                                                                                                   [$(_fieldPrefix)YYYYMM] as [$(_fieldPrefix)ÅÅÅÅMM],
+                                                                                                   Dual([$(_fieldPrefix)Quarter]&'. kvt',
+                                                                                                               [$(_fieldPrefix)Quarter])            AS [$(_fieldPrefix)Kvartal],
+                                                                                                   [$(_fieldPrefix)Index(Day)] as [$(_fieldPrefix)Index(Dag)],
+                                                                                                   [$(_fieldPrefix)Index(Month)] as [$(_fieldPrefix)Index(Måned)],
+                                                                                                   [$(_fieldPrefix)Index(Quarter)] as [$(_fieldPrefix)Index(Kvartal)],
+                                                                                                   [$(_fieldPrefix)Index(Year)] as [$(_fieldPrefix)Index(År)],
+                                                                                                   [$(_fieldPrefix)Workday] as [$(_fieldPrefix)Arbejdsdag],
+                                                                                                   [$(_fieldPrefix)PCT of Year (full)] as [$(_fieldPrefix)PCT af År (fuld)],
+                                                                                                   [$(_fieldPrefix)PCT of Quarter (full)] as [$(_fieldPrefix)PCT af Kvartal (fuld)],
+                                                                                                   [$(_fieldPrefix)PCT of Month (full)] as [$(_fieldPrefix)PCT af Måned (fuld)],
+                                                                                                   [$(_fieldPrefix)PCT of Week (full)] as [$(_fieldPrefix)PCT af Uge (fuld)],
+                                                                                                   [$(_fieldPrefix)PCT of Year (workdays)] as [$(_fieldPrefix)PCT af År (arbejdsdage)],
+                                                                                                   [$(_fieldPrefix)PCT of Quarter (workdays)] as [$(_fieldPrefix)PCT af kvartal (arbejdsdage)],
+                                                                                                   [$(_fieldPrefix)PCT of Month (workdays)] as [$(_fieldPrefix)PCT af Måned (arbejdsdage)],
+                                                                                                   [$(_fieldPrefix)PCT of Week (workdays)] as [$(_fieldPrefix)PCT af Uge (arbejdsdage)],
+                                                                                                   [$(_fieldPrefix)Finance Period] as [$(_fieldPrefix)Finans Periode],
+                                                                                                   [$(_fieldPrefix)Finance Period ÅÅÅÅ-PP] as [$(_fieldPrefix)Finans Periode ÅÅÅÅ-PP],
+                                                                                                   [$(_fieldPrefix)Finance Period ÅÅÅÅPP] as [$(_fieldPrefix)Finans Periode ÅÅÅÅPP]                                                                                                                    
+                                        RESIDENT  [$(_tableName) TEMP] ;
+                                        
+                                        LET cal_$(_fieldPrefix)Selected_YearIndex  = 'if(GetPossibleCount([$(_fieldPrefix)Index(År)])=1,only([$(_fieldPrefix)Index(År)]+if(isnull($1),0,$1)),only({<[$(_fieldPrefix)År] = {' & chr(36) & '(=year('&chr(39)&'$(_indexdate)'&chr(39)&'))}>}[$(_fieldPrefix)Index(År)]+if(isnull($1),0,$1)))' ; 
+                                        LET cal_$(_fieldPrefix)Selected_Year       = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(År)] = {"' & chr(36) & '(=' & chr(36) & '(cal_$(_fieldPrefix)Selected_YearIndex($1)))"}>} [$(_fieldPrefix)År])';
+                                        LET cal_$(_fieldPrefix)Selected_MonthIndex = 'if(GetPossibleCount([$(_fieldPrefix)Index(Måned)])=1,only([$(_fieldPrefix)Index(Måned)]), if(GetPossibleCount([$(_fieldPrefix)Index(År)])=1,only({<[$(_fieldPrefix)Måned] = {' & chr(36) & '(=if(GetPossibleCount([$(_fieldPrefix)Måned])=1,only([$(_fieldPrefix)Måned]),month('&chr(39)&'$(_indexdate)'&chr(39)&')))}>}[$(_fieldPrefix)Index(Måned)]+if(isnull($1),0,$1)),only({<[$(_fieldPrefix)År] = {' & chr(36) & '(=year('&chr(39)&'$(_indexdate)'&chr(39)&'))},[$(_fieldPrefix)Måned] = {' & chr(36) & '(=if(GetPossibleCount([$(_fieldPrefix)Måned])=1,only([$(_fieldPrefix)Måned]),month('&chr(39)&'$(_indexdate)'&chr(39)&')))}>}[$(_fieldPrefix)Index(Måned)]+if(isnull($1),0,$1))))';
+                                        LET cal_$(_fieldPrefix)Selected_Month      = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(Måned)] = {"' & chr(36) & '(=' & chr(36) & '(cal_$(_fieldPrefix)Selected_MonthIndex($1)))"}>} [$(_fieldPrefix)År] ' & chr(38) & chr(39) & '-' & chr(39) & chr(38) & ' [$(_fieldPrefix)Måned])'; 
+                                        LET cal_$(_fieldPrefix)Current_Year                         = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(År)] = {"0"}>} [$(_fieldPrefix)År] + if(isnull($1),0,$1))';     
+                                        LET cal_$(_fieldPrefix)Current_Month                        = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(Måned)] = {"' & chr(36) & '(=if(isnull($1),0,$1))'&'"}>} [$(_fieldPrefix)År] ' & chr(38) & chr(39) & '-' & chr(39) & chr(38) & ' [$(_fieldPrefix)Måned])';
+                         else 
+                              [$(_tableName)]:
+                                NoConcatenate 
+                                LOAD DISTINCT    [$(_key)],
+                                                                                       [$(_fieldPrefix)Date],
+                                                                      [$(_fieldPrefix)Year],
+                                                                      Dual([$(_fieldPrefix)Half-Year]&'. half', [$(_fieldPrefix)Half-Year]) as [$(_fieldPrefix)Half-Year],
+                                                                                                   [$(_fieldPrefix)Month],
+                                                                                                   [$(_fieldPrefix)Week],
+                                                                                                   [$(_fieldPrefix)Day],
+                                                                                                   [$(_fieldPrefix)WeekDayNO],
+                                                                                                   [$(_fieldPrefix)WeekDayShort],
+                                                                                                  [$(_fieldPrefix)WeekDayLong],
+                                                                                                   [$(_fieldPrefix)YYYYMM],
+                                                                                                   Dual('Q'&[$(_fieldPrefix)Quarter],
+                                                                                                               [$(_fieldPrefix)Quarter])            AS          [$(_fieldPrefix)Quarter],
+                                                                                                   [$(_fieldPrefix)Index(Day)],
+                                                                                                   [$(_fieldPrefix)Index(Month)],
+                                                                                                   [$(_fieldPrefix)Index(Quarter)],
+                                                                                                   [$(_fieldPrefix)Index(Year)],
+                                                                                                   [$(_fieldPrefix)Workday],
+                                                                                                   [$(_fieldPrefix)PCT of Year (full)],
+                                                                                                   [$(_fieldPrefix)PCT of Quarter (full)],
+                                                                                                   [$(_fieldPrefix)PCT of Month (full)],
+                                                                                                   [$(_fieldPrefix)PCT of Week (full)],
+                                                                                                   [$(_fieldPrefix)PCT of Year (workdays)],
+                                                                                                   [$(_fieldPrefix)PCT of Quarter (workdays)],
+                                                                                                   [$(_fieldPrefix)PCT of Month (workdays)],
+                                                                                                   [$(_fieldPrefix)PCT of Week (workdays)],
+                                                                                                   [$(_fieldPrefix)Finance Period],
+                                                                                                   [$(_fieldPrefix)Finance Period ÅÅÅÅ-PP],
+                                                                                                   [$(_fieldPrefix)Finance Period ÅÅÅÅPP]
+                                        RESIDENT  [$(_tableName) TEMP] ;
+                                        
+                                        LET cal_$(_fieldPrefix)Selected_YearIndex  = 'if(GetPossibleCount([$(_fieldPrefix)Index(År)])=1,only([$(_fieldPrefix)Index(År)]+if(isnull($1),0,$1)),only({<[$(_fieldPrefix)År] = {' & chr(36) & '(=year('&chr(39)&'$(_indexdate)'&chr(39)&'))}>}[$(_fieldPrefix)Index(År)]+if(isnull($1),0,$1)))' ; 
+                                        LET cal_$(_fieldPrefix)Selected_Year       = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(År)] = {"' & chr(36) & '(=' & chr(36) & '(cal_$(_fieldPrefix)Selected_YearIndex($1)))"}>} [$(_fieldPrefix)År])';
+                                        LET cal_$(_fieldPrefix)Selected_MonthIndex = 'if(GetPossibleCount([$(_fieldPrefix)Index(Måned)])=1,only([$(_fieldPrefix)Index(Måned)]), if(GetPossibleCount([$(_fieldPrefix)Index(År)])=1,only({<[$(_fieldPrefix)Måned] = {' & chr(36) & '(=if(GetPossibleCount([$(_fieldPrefix)Måned])=1,only([$(_fieldPrefix)Måned]),month('&chr(39)&'$(_indexdate)'&chr(39)&')))}>}[$(_fieldPrefix)Index(Måned)]+if(isnull($1),0,$1)),only({<[$(_fieldPrefix)År] = {' & chr(36) & '(=year('&chr(39)&'$(_indexdate)'&chr(39)&'))},[$(_fieldPrefix)Måned] = {' & chr(36) & '(=if(GetPossibleCount([$(_fieldPrefix)Måned])=1,only([$(_fieldPrefix)Måned]),month('&chr(39)&'$(_indexdate)'&chr(39)&')))}>}[$(_fieldPrefix)Index(Måned)]+if(isnull($1),0,$1))))';
+                                        LET cal_$(_fieldPrefix)Selected_Month      = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(Måned)] = {"' & chr(36) & '(=' & chr(36) & '(cal_$(_fieldPrefix)Selected_MonthIndex($1)))"}>} [$(_fieldPrefix)År] ' & chr(38) & chr(39) & '-' & chr(39) & chr(38) & ' [$(_fieldPrefix)Måned])'; 
+                                        LET cal_$(_fieldPrefix)Current_Year                         = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(År)] = {"0"}>} [$(_fieldPrefix)År] + if(isnull($1),0,$1))';     
+                                        LET cal_$(_fieldPrefix)Current_Month                        = 'only({<[$(_fieldPrefix)År],[$(_fieldPrefix)Måned],[$(_fieldPrefix)Index(Måned)] = {"' & chr(36) & '(=if(isnull($1),0,$1))'&'"}>} [$(_fieldPrefix)År] ' & chr(38) & chr(39) & '-' & chr(39) & chr(38) & ' [$(_fieldPrefix)Måned])';
+                         end if                   
+            end if
+
+               DROP Table [$(_tableName) TEMP];              
+
+            let _indexdate=;
+                                        
+       call QV.Trace(0,'Calendar Created - $(_tableName)',0) ;       
+END SUB   
+      
+SUB QV.Calendar_Min_Max(i_FieldName, i_ReturnPrefix)
+
+                         Min_Max_TEMP:
+                         NoConcatenate
+                         Load
+                                     YearStart(Min(Date_Field)) as GetMinDate,
+                                     YearEnd(Max(Date_Field)) as GetMaxDate;
+                         Load
+                                     FieldValue('$(i_FieldName)', IterNo()) as Date_Field
+                         Autogenerate(1)
+                                     While not IsNull(FieldValue('$(i_FieldName)', IterNo()));
+
+                         LET $(i_ReturnPrefix).Min = peek('GetMinDate');
+        LET $(i_ReturnPrefix).Max = peek('GetMaxDate');
+                         
+END SUB 
+
+sub QV.Get_Min_Max(_tableName, _FieldNavn, _Return_var)
+       call QV.Trace(1,'Finding Min & Max - $(_tableName).$(_FieldNavn)]',0) ;
+
+       Get_Min_Max_TEMP:
+       LOAD min([$(_FieldNavn)]) as Get_min_field,
+       year(Today()) as Get_max_field
+//            max([$(_FieldNavn)]) as Get_max_field
+       RESIDENT [$(_tableName)];
+  
+       LET $(_Return_var).Max = peek('Get_max_field');
+       LET $(_Return_var).Min = peek('Get_min_field');
+  
+       Drop table Get_Min_Max_TEMP;   
+
+       call QV.Trace(0,'Min ($($(_Return_var).Min)) & Max ($($(_Return_var).Max)) - $(_tableName).$(_FieldNavn)]',0) ;
+end sub
+
+//Indlæsning af anmeldelser
+
+SagerOgForhold:
+LOAD Replace([HovedforholdJournalNr],'-' , '' ) &  '|' &[INR] as HF_JournalCpr_KEY,
+     Replace([HovedforholdJournalNr],'-' , '' ) as KR_HovedforholdJournalnr,
+     HovedforholdJournalPers, 
+     Polsas_KredsNR as RA_KredsNr, 
+     Gernings_DATO, 
+     Anmeldelse_DATO, 
+     Sigtelse_DATO, 
+     SenesteAfdeling_KEY as Afdeling_KEY,
+     //AfgGerningskode_KEY as Gerningskode_KEY,  
+     Tiltale_Dato as Tiltale_DATO, 
+     if(Tiltale_Dato-Anmeldelse_DATO <= 165, 1 ,0) as FLA_Afsoning_FLAG,
+     SenesteAfg_DATO as DATO_FLA_KEY,
+     SenesteAfg_DATO,
+     //SenesteAfgMyndighedsKode as MYNDIGHED_KEY, 
+     FrihedsstrafAntalDageSamlet,
+     'Domme' as [Sagstrin - detaljeret],
+     AntalForhold, 
+     1 as KR_FLA_FLAG,
+     'KR_AFSONING' as Datasaet
+  FROM [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_KR_AFSONING_FLA.qvd] (qvd) 
+  where year([SenesteAfg_DATO]) > 2020
+  ;
+
+left join (SagerOgForhold)
+SagerOgForhold:
+LOAD [INR]
+      ,[HovedforholdJournalNr] 
+      ,Replace([HovedforholdJournalNr],'-' , '' ) &  '|' &[INR] as HF_JournalCpr_KEY
+      ,[AfgoerelseGerningskode_KEY] as Gerning_Key
+      ,[DanskAfgoerelse_FLAG] 
+      ,[RenSag_FLAG] 
+      ,[SenesteAfgMyndighedsKode] as MYNDIGHED_KEY
+  FROM [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_KR_AFGØRELSER.qvd] (qvd) 
+  ;
+
+Concatenate(SagerOgForhold)
+SagerOgForhold:
+Load 
+      Sagstrin 
+     ,Afgørelser 
+     ,[Sagstrin - detaljeret] 
+     ,[Sagstrin - detaljeret2]
+     ,[Sagstrin - detaljeret2] as AfslutningsType
+     ,SortOrder
+     ,HF_SagsKompleks_KEY
+     ,HF_Journal_KEY
+     ,[SagskompleksPersonLbNr_KEY]
+     ,PolitiKredsNr as RA_KredsNr
+   //  ,OrgKreds
+     ,Journal_KEY
+     ,Right(Journal_KEY,16) as Journal
+     ,Person_KEY as RA_Person_KEY
+     ,JourPers_KEY as RA_JourPers_KEY
+     ,DATO_KEY as RA_DATO_KEY
+     ,If(ISNULL(Gerningskode_KEY),'-1',Gerningskode_KEY) as Gerning_Key
+     ,Afdeling_KEY as Afdeling_KEY
+     ,AfgoerlsesType
+     ,AFGOERELSEMAADE_KEY as AFGOERELSESMAADE_KEY
+     ,StrafArt as STRAFART_KEY
+     ,MYNDIGHED_KEY
+     ,Sagsstatus_KEY as RA_Sagsstatus_KEY 
+     ,Tilhoersforhold_KEY
+     ,Sagsbehandler
+     ,Gernings_DATO 
+     ,Anmeldelse_DATO
+     ,Sigtelse_DATO
+     ,Tiltale_DATO 
+     ,FoersteIndfordring_DATO 
+     ,ForenkletBoedeSag_DATO 
+     ,OevrigAfg_DATO 
+     ,TiltaleOevrigAfg_DATO 
+     ,Boede_DATO
+     ,Henlagt_DATO 
+     ,SenesteAfg_DATO 
+     ,Fuldbyrdet_DATO 
+     ,DATO_SAG_KEY
+     ,DATO_FLA_KEY
+     ,FLA_StraffesagMål_FLAG
+     ,AntalForhold
+     ,HenlagtType
+     ,Henlagt_FLAG
+     ,Sigtelse_FLAG
+     ,Tiltale_FLAG
+     ,Afg_FLAG
+     ,Dom_FLAG
+     ,Boede_FLAG
+     ,ForenkletBoedeSag_FLAG
+     ,OevrigAfg_FLAG
+     ,Indfordring_FLAG
+     ,VerserendeSagsplacering_FLAG
+     ,VerserendeAnmeldelse_FLAG
+     ,VerserendeSigtelse_FLAG
+     ,VerserendeTiltale_FLAG
+     ,Udeblivelsesdom_FLAG
+     ,FaeldendeAfg_FLAG
+     ,AntalMeldepligtOvertraedelser
+     ,Tillaegsanklageskrift_FLAG
+     ,JournalBeskrivelse
+     ,Covid
+     ,if([ItOekKrimOpr_FLAG]=1,'Ja','Nej')as ItOekKrimOpr_Filter
+     ,if([ItOekKrimUdv_FLAG]=1,'Ja','Nej')as ItOekKrimUdv_Filter
+     ,[Anmeldelse til sigtelse]
+     ,[Anmeldelse til tiltale]
+     ,[Anmeldelse til afgørelse af tiltalespørgsmål]
+     ,[Anmeldelse til dom]
+     ,[Sigtelse til tiltale]
+     ,[Sigtelse til dom]
+     ,[Sigtelse til afgørelse af tiltalespørgsmål]
+     ,[Tiltale til dom]
+            ,[Dom til fuldbyrdelse]
+            ,'$(s_DWHDato)' - Anmeldelse_DATO as AnmeldelsesAlder
+     ,'$(s_DWHDato)' - Sigtelse_DATO as SigtelsesAlder
+            ,'$(s_DWHDato)' - Tiltale_DATO as TiltaleAlder
+            ,'$(s_DWHDato)' - Gernings_DATO as GerningsAlder
+            ,If([Anmeldelse til afgørelse af tiltalespørgsmål] <= 85, 'Under 85 dage',
+                         If([Anmeldelse til afgørelse af tiltalespørgsmål] <= 170, 'Under 170 dage', 'Over 170 dage')) as MaalKategori
+            ,[Store sager]
+            ,[AlderPaaGerningstidspunkt]
+            ,StraffesagsfristOverskredet
+      ,'SoF' as Datasaet
+      
+    FROM [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_SagerOgForholdPivoteret.qvd]
+(qvd)
+  WHERE
+
+// Datoafgræsning 
+    (YEAR([DATO_KEY]) >= 2021
+    and (
+  [Sagstrin - detaljeret]  = 'Henlæggelser' or
+            [Sagstrin - detaljeret]  = 'Tiltaler m. retsmøde' or
+            [Sagstrin - detaljeret]  = 'Tiltaler u. retsmøde' or
+            [Sagstrin - detaljeret]  = 'Øvrige afgørelser' or
+            [Sagstrin - detaljeret]  = 'Udenretlige bøder' or 
+            [Sagstrin - detaljeret]  = 'Domme'
+            ))
+            or 
+	    (YEAR([DATO_FLA_KEY]) >= 2021
+    and (
+	[Sagstrin - detaljeret]  = 'Tiltaler m. retsmøde' or
+	[Sagstrin - detaljeret]  = 'Tiltaler u. retsmøde' or
+	[Sagstrin - detaljeret]  = 'Øvrige afgørelser' or
+	[Sagstrin - detaljeret]  = 'Udenretlige bøder' or 
+	[Sagstrin - detaljeret]  = 'Domme'
+	))
+  ;
+
+Left join (SagerOgForhold)
+SagerOgForhold:
+Load distinct JourPers_KEY as RA_JourPers_KEY,   Placeringstekst, HF_SidstePlac_DATO, AntalForholdIKompleks
+FROM [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_SagerOgForhold.qvd](qvd)
+;
+
+Concatenate(SagerOgForhold)
+SagerOgForhold:
+Load 
+     HF_SagsKompleks_KEY, 
+     HF_Journal_KEY, 
+     HF_SagsPlac_KEY, 
+     HF_JournalNr, 
+     HF_JournalNr_lang, 
+     HF_SidsteSagsPlacPerLbNr, 
+     HF_SidstePlacLbNr, 
+     HF_SidstePlac_DATO, 
+             '$(s_DWHDato)' as RA_DATO_KEY,
+     Journal_KEY,
+     Right(Journal_KEY,16) as Journal,
+     JourPers_KEY as RA_JourPers_KEY,  
+     ForholdsNr, 
+     Person_KEY as RA_Person_KEY, 
+     PolitiKredsNr as RA_KredsNr,
+     JournalNr, 
+     JournalNr_lang, 
+     PersonLbNr, 
+     AnmeldelseGerningskode_KEY, 
+     SigtelseGerningskode_KEY, 
+     TiltaleGerningskode_KEY, 
+             If(Tiltale_FLAG=1, TiltaleGerningskode_KEY,
+                         If(Sigtelse_FLAG=1, SigtelseGerningskode_KEY, AnmeldelseGerningskode_KEY)) as Gerning_Key,
+     AnmeldelseAfdeling_KEY, 
+     SigtelseAfdeling_KEY, 
+     TiltaleAfdeling_KEY, 
+     FoersteAfgAfdeling_KEY, 
+     TiltaleOevigAfgAfdeling_KEY, 
+     SenesteAfdeling_KEY as Afdeling_KEY, 
+     Sagsbehandler, 
+     Sagsstatus_KEY as RA_Sagsstatus_KEY, 
+     Tilhoersforhold_KEY, 
+     SagIPolsas_DATO, 
+     SigtelseIPolsas_DATO, 
+     Sagudskilt_DATO, 
+     Gernings_DATO, 
+     Date(Anmeldelse_DATO) as Anmeldelse_DATO, 
+     Date(Sigtelse_DATO) as Sigtelse_DATO, 
+     Date(Tiltale_DATO) as Tiltale_DATO,
+     Tiltale_FLAG, 
+     Sigtelse_FLAG, 
+     FoersteIndfordring_DATO, 
+     ForenkletBoedeSag_DATO, 
+     OevrigAfg_DATO, 
+     TiltaleOevrigAfg_DATO, 
+     Boede_DATO, 
+     Henlagt_DATO, 
+             AntalForholdIKompleks,
+     FoersteAfg_DATO, 
+     SenesteAfg_DATO, 
+     Erindrings_DATO, 
+     JournalBeskrivelse, 
+     AlderPaaGerningstidspunkt, 
+     Placeringstekst, 
+     TiltaledatoBeregningsModel, 
+     HenlagtType, 
+     HF_FLAG, 
+     Boede_FLAG, 
+     ForenkletBoedeSag_FLAG, 
+     Dom_FLAG, 
+     OevrigAfg_FLAG, 
+     Indfordring_FLAG, 
+     Afg_FLAG, 
+     Henlagt_FLAG, 
+     VerserendeSagsplacering_FLAG, 
+     VerserendeAnmeldelse_FLAG, 
+     VerserendeSigtelse_FLAG, 
+     VerserendeTiltale_FLAG, 
+     Udeblivelsesdom_FLAG, 
+     FaeldendeAfg_FLAG,  
+     if([ItOekKrimOpr_FLAG]=1,'Ja','Nej')as ItOekKrimOpr_Filter,
+     if([ItOekKrimUdv_FLAG]=1,'Ja','Nej')as ItOekKrimUdv_Filter,
+     StorSag_FLAG, //CR:0437
+            [Store sager]
+      ,'AktuelVers' as Datasaet
+              ,'$(s_DWHDato)' - Anmeldelse_DATO as AnmeldelsesAlder
+     ,'$(s_DWHDato)' - Sigtelse_DATO as SigtelsesAlder
+            ,'$(s_DWHDato)' - Tiltale_DATO as TiltaleAlder
+            ,'$(s_DWHDato)' - Gernings_DATO as GerningsAlder
+            ,if('$(s_DWHDato)' - Sigtelse_DATO < 85, 'Under 85 dage', if('$(s_DWHDato)' - Sigtelse_DATO < 170, '85-170 dage', 'Over 170 dage' )) as SigtetAlderGruppering
+            ,if('$(s_DWHDato)' - Tiltale_DATO < 85, 'Under 85 dage', if('$(s_DWHDato)' - Tiltale_DATO < 170, '85-170 dage', 'Over 170 dage' )) as TiltaleAlderGruppering
+            
+FROM [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_SagerOgForhold.qvd](qvd)
+where  VerserendeSigtelse_FLAG = 1 or VerserendeTiltale_FLAG = 1 // Kommenter MRP restriktioner ud and ItOekKrimUdv_FLAG = 0
+;
+
+Concatenate  (SagerOgForhold)
+SagerOgForhold:
+LOAD [Sagstrin]
+      ,[Niveau]
+              ,Datopunkt as RA_DATO_KEY
+              ,Datopunkt
+              ,KredsNr as RA_KredsNr
+      ,[Afdeling_KEY]as Afdeling_KEY
+      ,[Gerningskode_KEY] as Gerning_Key
+      ,[AlderGruppering]
+      ,[StraffeSag_FLAG]
+      ,[UndersoegelsesSag_FLAG]
+      ,if([ItOekKrimOpr_FLAG]=1,'Ja','Nej')as ItOekKrimOpr_Filter
+      ,if([ItOekKrimUdv_FLAG]=1,'Ja','Nej')as ItOekKrimUdv_Filter
+      ,[StorSag_FLAG]
+      ,[Faerdsel_FLAG]
+      ,[MOU_FLAG]
+      ,[ATK_FLAG] as Hist_ATK_FLAG
+      ,[Antal]
+      ,[Alder]
+      ,[DWH_DATO] //as DATO_KEY
+              ,'HistVers' as Datasaet
+  FROM [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_HistVerserendeBeholdningGrp.qvd](qvd)
+  
+  where (Sagstrin  = 'Sigtelser' or  Sagstrin = 'Tiltaler')and Year(Datopunkt) > 2017
+;
+
+Qualify *;
+UNQUALIFY RA_KredsNr, DATO_FLA_KEY, Afdeling_KEY,MYNDIGHED_KEY
+, DATO_SAG_KEY,AFGOERELSESMAADE_KEY,STRAFART_KEY,AfgoerlsesType, RA_Sagsstatus_KEY, Sagsbehandler
+,RA_DATO_KEY, RA_Person_KEY,Gerning_Key, ItOekKrimOpr_Filter, ItOekKrimUdv_Filter, AfslutningsType;
+
+RA_Detalje_FACT:
+Load *, 1 as Done 
+Resident SagerOgForhold;
+Drop Table SagerOgForhold;
+
+Unqualify *;
+LEFT JOIN (RA_Detalje_FACT)
+LOAD
+Gerningskode_KEY as Gerning_Key
+//,Sagsområde as Gerning_SagsOmraade
+,MID(Sagsområde,4) AS Sagsområde_filter
+,if(Personfarlig_FLAG = 1, 'PFU sager', 'Udelad PFU sager') as PersonFarligUdvidet
+FROM
+[..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Gerningskoder.qvd] (qvd)
+;
+
+Qualify *;
+UNQUALIFY Gerning_Key;
+GK:
+Left keep (RA_Detalje_FACT)
+LOAD Gerningskode_KEY as Gerning_Key
+     ,GerningskodeNr
+     ,GerningskodeTekst as Gerning_KodeTekst
+     ,Gerningskode
+     ,SagsområdeNr 
+     ,SagsområdeTekst
+     ,Sagsområde as Gerning_SagsOmraade
+     ,SagsområdeKort
+     ,Sagsområde_SORT
+     ,Kriminalitetstype as Gerning_KriminalitetsType
+            ,KriminalitetsArt
+            ,Paragraf
+            ,Kapitel   
+     ,HovedlovOmråde
+     ,JournalKapitel
+            ,OperativeGrupperinger
+            ,OperativeGrupperingerNummer
+            ,KriminalitetsArtGrp                            
+            ,KriminalitetsArtGrp_SORT 
+             ,KriminalitetsArtKort  
+     ,Straffesag_FLAG 
+             ,Udlaendingesag_FLAG
+            ,AnmType
+     ,StraffesagerTekst 
+     ,StraffelovTekst
+     ,AdministrativSag_FLAG 
+     ,UnderSøgelsesSag_FLAG 
+     ,Personfarlig_FLAG 
+     ,if(Personfarlig_FLAG = 1, 'PFU sager', 'Udelad PFU sager') as PersonFarligUdvidet
+            ,Vold_FLAG
+     ,Voldtaegt_FLAG
+     ,Vaaben_FLAG
+     ,ATK_FLAG
+            ,Meldepligt_FLAG
+            ,if(Meldepligt_FLAG = 0,'Udelad MOU','MOU') as MOUSager 
+             ,Tilhold_FLAG
+     ,Oprettet_DATO
+     ,Udgaaet_DATO
+     ,GkodeAnvendt1gang
+            ,Færdsel
+     ,[Meldepligt mm.]
+            ,Tilhold
+            ,Personfarlig
+            FROM
+[..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Gerningskoder.qvd] (qvd)
+;
+Qualify *;
+UNQUALIFY AfgoerlsesType;
+
+AFGØRELSESTYPER:
+Left keep (RA_Detalje_FACT)
+LOAD SenesteAfgoerelsestype_KEY  
+     ,AfgoerlsesType 
+     ,AfgoerlsestypeTekst 
+             ,Afgørelsestype
+     ,FaeldendeAfgoerelse 
+
+FROM
+[..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Afgoerelsestyper.qvd](qvd);  
+Qualify *;
+UNQUALIFY RA_Afdeling_KEY
+;
+
+AFD:
+UNQUALIFY Afdeling_KEY;
+Left keep (RA_Detalje_FACT)
+LOAD Afdeling_KEY as RA_Afdeling_KEY, 
+	 Afdeling_KEY,
+     AfdelingsNavn as Organisation_AfdelingsNavn, 
+     AfdelingsKode as Organisation_AfdelingsKode, 
+     Soejle as Organisation_Søjle, 
+     SoejleKort, 
+     Advokatur, 
+     AdvokaturKort,
+     AfdelingKort, 
+     PolsasNiveau2 as Organisation_Lvl1NrNavn, 
+     PolsasNiveau3 as Organisation_Lvl2NrNavn, 
+     PolsasNiveau4 as Organisation_Lvl3NrNavn, 
+     PolsasNiveau5 as Organisation_Lvl4NrNavn, 
+     PolsasNiveau6 as Organisation_Lvl5NrNavn, 
+     PolsasNiveau7 as Organisation_Lvl6NrNavn, 
+     AnklageMyndighed_FLAG, 
+     AnklagemyndighedTekst,
+     AMProduktion_FLAG, 
+     NSK_FLAG as Organisation_Flag_NSK
+FROM
+[..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Afdeling_POLSAS.qvd](qvd);
+
+Qualify *;
+UNQUALIFY AFGOERELSESMAADE_KEY
+;
+AFGMÅDE:
+Left keep (RA_Detalje_FACT)
+Load
+       [AFGOERELSESMAADE_KEY]
+      ,[AfgoerelsesmaadeKode]
+      ,[AfgoerelsesmaadeTekst]
+      ,Afgørelsesmåde
+      ,AfgørelsesmådeKort
+      ,Afgørelsesgruppe
+FROM
+[..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Afgørelsesmåder.qvd](qvd);
+
+Qualify *;
+UNQUALIFY MYNDIGHED_KEY
+;
+MYNDIGHED:
+Left keep (RA_Detalje_FACT)
+lOAD  [MYNDIGHED_KEY]
+      ,[Myndighedskode]
+      ,[Myndighednavn]
+      ,[Myndighedskategori]
+FROM
+[..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Myndigheder.qvd](qvd);
+
+UNQUALIFY *;
+
+call QV.Calendar(MakeDate(2014,01,01), s_DWHDato,  'TempCalendar', '', 'DK', 'full', 'Kalender_KEY');
+
+Qualify *;
+UNQUALIFY RA_DATO_KEY
+;
+
+KALENDER_RA:
+Left keep (RA_Detalje_FACT)
+Load *, 
+'Q' & KvartalNr & ' ' & Date(Dato,'YY') as KvartalAar,
+if(floor(Dato) = floor(MånedSlut), 1,0) as MånedSlutFlag, 
+if(floor(Dato) = floor(KvartalSlut), 1,0) as KvartalSlutFlag,
+if(floor(Dato) = floor(AarSlut) , 1, 0)
+
+as AarSlutFlag
+;
+Load *,
+If(match(År, 2021,2022,2023), 'MRP_ÅR') as MRP_ÅR;
+Load *, MonthEnd(Dato) as MånedSlut, QuarterEnd(Dato) as KvartalSlut, If(Year('$(s_DWHDato)')= Year(Dato), Monthend('$(s_DWHDato)',-1), YearEnd(Dato)) as AarSlut;
+
+LOAD
+            Kalender_KEY as [RA_DATO_KEY]
+            ,QuarterName(Kalender_KEY) as Kvartal
+            ,MonthName(Kalender_KEY) as Måned
+            ,WeekName(Kalender_KEY) as Uge
+            ,Ceil(Month(Kalender_KEY)/3) as KvartalNr
+            ,Month(Kalender_KEY) as MånedNr
+            ,Week(Kalender_KEY) as UgeNr
+            ,Dato
+            ,År
+            ,If(Kalender_KEY>=MonthStart('$(s_DWHDato)',-3),1,0)                     as Tidsserie_3md
+            ,If(Kalender_KEY>=MonthStart('$(s_DWHDato)',-6),1,0)                     as Tidsserie_6md
+            ,If(Kalender_KEY>=MonthStart('$(s_DWHDato)',-12),1,0)                    as Tidsserie_12md
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)',-3),1,0)                      as Tidsserie_3år
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)',-2),1,0)                      as Tidsserie_2år
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)',-1),1,0)                      as Tidsserie_1år
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)'),1,0)                                     as AktueltÅr
+            ,If(Kalender_KEY=floor(YearEnd('$(s_DWHDato)',-1)),1,0)                  as AarSlut_1år
+            ,If(Kalender_KEY=floor('$(s_DWHDato)'),1,0)                                                       as AktuelDato
+            ,DayNumberOfYear(Kalender_KEY)                                                                                             as Dag
+            ,If(DayNumberOfYear(Kalender_KEY)<=DayNumberOfYear('$(s_DWHDato)'),'1') as YTD_FLG
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)',-1),'Indeværende og sidste år')                       as [2YR]
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)',0),'1YR')                     as [1YR]
+            ,If(DayNumberOfYear(Kalender_KEY)<=DayNumberOfYear('$(s_DWHDato)'),'År til dato for valgte år') as YOY //CR.0441
+
+Resident [TempCalendar]
+order by Kalender_KEY desc;
+
+Qualify *;
+UNQUALIFY DATO_SAG_KEY
+;
+KALENDER_SAG:
+Left keep (RA_Detalje_FACT)
+Load *,
+If(match(År_SAG, 2021,2022,2023), 'MRP_ÅR') as MRP_ÅR_SAG;
+LOAD
+            Kalender_KEY as [DATO_SAG_KEY]
+            ,QuarterName(Kalender_KEY) as Kvartal_SAG
+            ,MonthName(Kalender_KEY) as Måned_SAG
+            ,WeekName(Kalender_KEY) as Uge_SAG
+            ,Ceil(Month(Kalender_KEY)/3) as KvartalNr_SAG
+            ,Month(Kalender_KEY) as MånedNr_SAG
+            ,Week(Kalender_KEY) as UgeNr_SAG
+            ,Date(Kalender_KEY) as Dato_SAG
+            ,Year(Kalender_KEY) as År_SAG
+            ,If(Year(Kalender_KEY)>=2014,1,0)                as ÅrSag_FLG
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)',-1),'Indeværende og sidste år')                       as [2YR_SAG]
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)',0),'1YR')                     as [1YR_SAG]
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)'),1,0) as AktueltÅr_SAG
+            ,If(DayNumberOfYear(Kalender_KEY)<=DayNumberOfYear('$(s_DWHDato)'),'År til dato for valgte år') as YOY_SAG  //CR.0441
+            
+Resident [TempCalendar]
+order by Kalender_KEY desc;
+
+UNQUALIFY *;
+Drop table [TempCalendar];
+
+Qualify *;
+UNQUALIFY STRAFART_KEY
+;
+STRAFART:
+Left keep (RA_Detalje_FACT)
+Load STRAFART_KEY
+      ,Strafart
+      ,StrafartTekst 
+              // StrafArt, Strafkode
+from [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Strafarter.QVD](qvd);
+
+Qualify *;
+UNQUALIFY RA_KredsNr, KredsNr ;
+ORG:
+Left keep (RA_Detalje_FACT)
+LOAD OrgKreds , 
+     KredsNr as RA_KredsNr, 
+     Replace(Kreds,'s Politi','') as Organisation_PolitikredsNavn,  
+     Kredsnavn_Kort, 
+     AktivKreds 
+ FROM [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Kredse.qvd] (qvd);
+
+Qualify *;
+UNQUALIFY RA_Person_KEY;
+
+PERSON:
+Left keep (RA_Detalje_FACT)
+LOAD Person_KEY as RA_Person_KEY, 
+     Personlbnr, 
+     Cprnr, 
+     Navn,
+            SenestePersonLbnr
+FROM [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_RPC_Personer.QVD](qvd); 
+; 
+
+Qualify *;
+UNQUALIFY RA_Sagsstatus_KEY,Sagsstatus_Key;
+Sagsstatus:
+Left keep (RA_Detalje_FACT)
+Load Sagsstatus_KEY as RA_Sagsstatus_KEY, 
+     SagsstatusKode, 
+     SagsstatusTekst as SagStatusKodeTekst, 
+     Verserende_FLAG, 
+     Fremtagelse_FLAG 
+             from [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_Sagsstatus.QVD](qvd);
+
+Qualify *;
+UNQUALIFY Sagsbehandler
+;
+BRUGER:
+Left keep (RA_Detalje_FACT)
+Load 
+BRUGER_KEY as Sagsbehandler, 
+     //OrgKreds, 
+     RPC_INIT, 
+     //RA_Afdeling_KEY, 
+     WRX, 
+     SagsbehandlerNavn, 
+     Email 
+from 
+        [..\..\..\..\QV_Environment\5_DCA\19_QlikApplication\40_STORAGE\40_RP_RPC_Brugere.QVD](qvd)
+;
+UNQUALIFY *;
+call QV.Calendar(MakeDate(2014,01,01), s_DWHDato, 'TempCalendar', '', 'DK', 'full', 'Kalender_KEY');
+
+Qualify *;
+UNQUALIFY DATO_FLA_KEY
+;
+[KALENDER_FLA]:
+Left keep (RA_Detalje_FACT)
+Load *,
+If(match(År_FLA, 2021,2022,2023), 'MRP_ÅR') as MRP_ÅR_FLA;
+LOAD
+            Kalender_KEY as [DATO_FLA_KEY]
+            ,QuarterName(Kalender_KEY) as Kvartal_FLA
+            ,MonthName(Kalender_KEY) as Måned_FLA
+            ,WeekName(Kalender_KEY) as Uge_FLA
+            ,Ceil(Month(Kalender_KEY)/3) as KvartalNr_FLA
+            ,Month(Kalender_KEY) as MånedNr_FLA
+            ,Week(Kalender_KEY) as UgeNr_FLA
+            ,Date(Kalender_KEY) as Dato_FLA
+            ,Year(Kalender_KEY) as År_FLA
+            ,If(Year(Kalender_KEY)>=2014,1,0)                as ÅrSag_FLA_FLG
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)',-1),'Indeværende og sidste år')                       as [2YR_FLA]
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)',0),'1YR')                     as [1YR_FLA]
+            ,If(Kalender_KEY>=YearStart('$(s_DWHDato)'),1,0) as AktueltÅr_FLA
+            ,If(DayNumberOfYear(Kalender_KEY)<=DayNumberOfYear('$(s_DWHDato)'),'År til dato for valgte år') as YOY_FLA  //CR.0441
+            
+Resident [TempCalendar]
+order by Kalender_KEY desc;
+
+Drop table [TempCalendar];
+
+UNQUALIFY *;
+///$tab Samlede facts/dims
+SamletFact:
+Load *, 1 as Test Resident RA_Detalje_FACT where not match(RA_KredsNr, 13, 14);
+Concatenate (SamletFact)
+Load *, 1 as Test Resident FACT2 where not match(KredsNr, 13, 14);
+Concatenate (SamletFact)
+Load *, 1 as Test Resident PO_FACT;
+
+Drop Tables RA_Detalje_FACT, FACT2, PO_FACT;
+
+
+///$tab Define Table Metadata
+//Enter metadata for Fact and dimension tables (don't change tablename or fieldnames:
+
+//QlikMart_Table:
+QlikMart_Table:
+LOAD * INLINE [
+    QlikMart_TableName, QlikMart_TableDescription
+];
+///$tab Define Field Metadata
+//Enter metadata for Fields (don't change tablename or fieldnames:
+
+//QlikMart_Field:
+QlikMart_Field:
+LOAD * INLINE [
+    QlikMart_FieldName, QlikMart_FieldDescription
+];
+///$tab End
+//********************************SHEET: End, START*******************************
+CALL UtilityTagFieldsWithDimensionOrMeasure;
+
+//CALL ManualLoad;
+//From here you can choose to load global variables. 
+//The CALL expects the name of af .QVS file located in ...QV_GlobalRessources\10_Setup
+//eg. CALL UtilityLoadCustomGlobalVariables ('Setup_GlobalNAVVariables');
+
+CALL UtilityLoadCustomGlobalVariables ('Setup_GlobalVariables');
+
+CALL UtilityLoadLocalVariables;
+
+//Rutine for the end log
+CALL UtilityAuditLogDetailEnd;
+
+DROP Table LogDetail;
+
+//End rutines:
+CALL UtilityEndRoutines;
+
+//********************************THE END*******************************
+CALL ENDLOG(QVD_FILE);
+Exit Script;
